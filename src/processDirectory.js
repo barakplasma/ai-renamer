@@ -41,7 +41,7 @@ const processDirectory = async ({ options, inputPath, progressBar, totalFiles })
 module.exports = async ({ options, inputPath }) => {
   const totalFiles = { count: 0 };
   const progressBar = new cliProgress.SingleBar({
-    format: 'Processing |{bar}| {percentage}% || {value}/{total} Files || ETA: {eta}s',
+    format: 'Processing |{bar}| {percentage}% || {value}/{total} Files || ETA: {eta_formatted}',
     hideCursor: true
   });
 
