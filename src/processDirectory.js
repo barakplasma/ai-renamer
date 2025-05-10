@@ -18,19 +18,20 @@ const processDirectory = async ({ options, inputPath, progressBar, totalFiles })
 
     const files = await fs.readdir(inputPath);
 
+    if (files.length > 0) {
+      totalFiles.count += files.length;
+      progressBar.setTotal(totalFiles.count);
+    }
+
     for (const file of files) {
       const filePath = path.join(inputPath, file);
       const fileStats = await fs.stat(filePath);
       if (fileStats.isFile()) {
-        totalFiles.count++;
-        progressBar.setTotal(totalFiles.count);
         await processFile({ ...options, filePath });
+        progressBar.increment();
       } else if (fileStats.isDirectory() && options.includeSubdirectories) {
-        totalFiles.count++;
-        progressBar.setTotal(totalFiles.count);
         await processDirectory({ options, inputPath: filePath, progressBar, totalFiles });
       }
-      progressBar.increment();
     }
   } catch (err) {
     console.error(err.message);
