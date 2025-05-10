@@ -4,8 +4,18 @@ const cliProgress = require('cli-progress');
 
 const processFile = require('./processFile')
 
+const visitedDirectories = new Set();
+
 const processDirectory = async ({ options, inputPath, progressBar, totalFiles }) => {
   try {
+    if (visitedDirectories.has(inputPath)) {
+      console.log(`Skipping already visited directory: ${inputPath}`);
+      return;
+    }
+
+    visitedDirectories.add(inputPath);
+    console.log(`Processing directory: ${inputPath}`);
+
     const files = await fs.readdir(inputPath);
 
     for (const file of files) {
@@ -23,7 +33,7 @@ const processDirectory = async ({ options, inputPath, progressBar, totalFiles })
       progressBar.increment();
     }
   } catch (err) {
-    console.log(err.message);
+    console.error(err.message);
   }
 };
 
@@ -32,7 +42,7 @@ module.exports = async ({ options, inputPath }) => {
   const progressBar = new cliProgress.SingleBar({
     format: 'Processing |{bar}| {percentage}% || {value}/{total} Files || ETA: {eta}s',
     hideCursor: true
-  }, cliProgress.Presets.shades_classic);
+  });
 
   progressBar.start(0, 0);
 
