@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""Operating-system, JSON, HTTP, and media effects for the Bend CLI."""
+import base64
+import ctypes
+import fcntl
+import errno
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+
+TIMEOUT = 120
+MAX_TEXT = 1024 * 1024
+MAX_IMAGE = 20 * 1024 * 1024
+MAX_RESPONSE = 1024 * 1024
+
+
+def fields(values):
+    return "\0".join(values)
+
+
+def config(overrides):
+    path = Path.home() / "ai-renamer.json"
+    if not overrides:
+        return config_locked(path, overrides)
+    lock = os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(lock) as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return config_locked(path, overrides)
+
+
+def config_locked(path, overrides):
+    try:
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            data = {}
+    except (FileNotFoundError, ValueError):
+        data = {}
+    if overrides:
+        data.update(zip(overrides[::2], overrides[1::2]))
+        fd, tmp = tempfile.mkstemp(prefix=".ai-renamer-", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump(data, output, ensure_ascii=False, indent=2)
+                output.write("\n")
+            os.replace(tmp, path)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+    return fields(
+        str(v).lower() if isinstance(v, bool) else str(v)
+        for pair in data.items() for v in pair
+    ) if data else ""
+
+
+def scan(raw, recursive):
+    root = Path(raw).absolute()
+    mode = root.lstat().st_mode
+    if stat.S_ISREG(mode):
+        return fields(("file", str(root), root.name, root.suffix[1:]))
+    if not stat.S_ISDIR(mode):
+        raise ValueError("Input must be a regular file or directory.")
+    records = []
+    pending = [root]
+    visited = set()
+    while pending:
+        directory = pending.pop()
+        relative = str(directory.relative_to(root))
+        try:
+            info = directory.lstat()
+            identity = (info.st_dev, info.st_ino)
+            if identity in visited or not stat.S_ISDIR(info.st_mode):
+                continue
+            visited.add(identity)
+            records.extend(("dir", str(directory), relative, ""))
+            with os.scandir(directory) as entries:
+                for entry in sorted(entries, key=lambda item: item.name):
+                    shown = str(Path(entry.path).relative_to(root))
+                    if entry.is_dir(follow_symlinks=False) and recursive == "true":
+                        pending.append(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        records.extend(("file", entry.path, shown, Path(entry.name).suffix[1:]))
+        except OSError as error:
+            records.extend(("warn", str(directory), f"{relative}: {error}", ""))
+    return fields(records)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def request(base, route, key, body=None):
+    if not base.startswith(("https://", "http://")):
+        raise ValueError("Base URL must use http or https.")
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    base = base.rstrip("/")
+    if base.endswith("/v1") and route.startswith("/v1/"):
+        route = route[3:]
+    req = urllib.request.Request(
+        base + route,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers=headers,
+    )
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=TIMEOUT) as result:
+            raw = result.read(MAX_RESPONSE + 1)
+    except urllib.error.HTTPError as error:
+        with error:
+            raw = error.read(8192)
+        try:
+            detail = json.loads(raw).get("error")
+            if isinstance(detail, dict):
+                detail = detail.get("message")
+        except (ValueError, AttributeError):
+            detail = None
+        raise ValueError(f"HTTP {error.code}: {detail or error.reason}") from error
+    if len(raw) > MAX_RESPONSE:
+        raise ValueError("Model response exceeded 1 MiB.")
+    return json.loads(raw)
+
+
+def models(provider, base, key):
+    if provider == "ollama":
+        items = request(base, "/api/tags", "", None)["models"]
+    else:
+        items = request(base, "/v1/models", key, None)["data"]
+    return fields(item.get("id") or item["name"] for item in items)
+
+
+def command(*args):
+    result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, timeout=TIMEOUT, check=False)
+    if result.returncode:
+        raise ValueError(result.stderr.decode(errors="replace").strip() or f"{args[0]} failed.")
+    return result.stdout
+
+
+def image(path):
+    mime = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff",
+    }.get(path.suffix.lower(), "image/jpeg")
+    with path.open("rb") as data:
+        content = data.read(MAX_IMAGE + 1)
+    if len(content) > MAX_IMAGE:
+        raise ValueError(f"Image exceeds {MAX_IMAGE // 1024 // 1024} MiB.")
+    return mime, base64.b64encode(content).decode("ascii")
+
+
+def video(path, frames):
+    duration = float(command(
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path)
+    ).strip())
+    if duration <= 0:
+        raise ValueError("Video has no positive duration.")
+    count = max(1, min(frames, int(duration)))
+    with tempfile.TemporaryDirectory(prefix="ai-renamer-") as temp:
+        command("ffmpeg", "-nostdin", "-v", "error", "-threads", "1",
+                "-filter_threads", "1", "-i", str(path), "-vf", f"fps={count / duration}",
+                "-frames:v", str(count), "-q:v", "2", "-threads", "1",
+                str(Path(temp) / "frame_%03d.jpg"))
+        images = [image(p) for p in sorted(Path(temp).glob("*.jpg"))]
+    if not images:
+        raise ValueError("No video frames could be extracted.")
+    return images, (
+        f"Analyze these {len(images)} frames from a {duration:.1f}-second video. "
+        f"One frame every {duration / count:.1f} seconds."
+    )
+
+
+def suggest(provider, base, key, model, kind, frames, raw, prompt, custom):
+    path = Path(raw)
+    images = []
+    if kind == "image":
+        images = [image(path)]
+    elif kind == "video":
+        images, context = video(path, int(frames))
+        prompt = context + "\n\n" + prompt
+    else:
+        if kind == "pdf":
+            content = command("pdftotext", str(path), "-")[:MAX_TEXT]
+        else:
+            with path.open("rb") as text:
+                content = text.read(MAX_TEXT)
+        text = content.decode("utf-8", errors="replace").strip()
+        if not text:
+            raise ValueError("No text content.")
+        prompt += "\n\nContent:\n" + text
+    if custom:
+        prompt += "\n\nCustom instructions:\n" + custom
+    if provider == "ollama":
+        payload = {"model": model, "prompt": prompt, "stream": False}
+        if images:
+            payload["images"] = [content for _, content in images]
+        answer = request(base, "/api/generate", "", payload)["response"]
+    else:
+        parts = [{"type": "text", "text": prompt}]
+        parts.extend({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}
+                     for mime, data in images)
+        payload = {"model": model, "stream": False,
+                   "messages": [{"role": "user", "content": parts}]}
+        answer = request(base, "/v1/chat/completions", key, payload)["choices"][0]["message"]["content"]
+    if not isinstance(answer, str):
+        raise ValueError("Model did not return text.")
+    return answer
+
+
+def move_noreplace(source, dest):
+    libc = ctypes.CDLL(None, use_errno=True)
+    args = (os.fsencode(source), os.fsencode(dest))
+    if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        # AT_FDCWD and RENAME_NOREPLACE from Linux UAPI.
+        status = libc.renameat2(-100, args[0], -100, args[1], 1)
+    elif sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        # RENAME_EXCL in macOS stdio.h.
+        status = libc.renamex_np(*args, 4)
+    else:
+        status = -1
+        ctypes.set_errno(errno.ENOSYS)
+    if status == 0:
+        return
+    code = ctypes.get_errno()
+    if code not in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
+        raise OSError(code, os.strerror(code), str(dest))
+
+    os.link(source, dest, follow_symlinks=False)
+    try:
+        source.unlink()
+    except OSError:
+        dest.unlink()
+        raise
+
+
+def rename(raw, candidate, relative):
+    source = Path(raw)
+    if not stat.S_ISREG(source.lstat().st_mode):
+        raise ValueError("Source must be a regular file.")
+    if not candidate or candidate in (".", "..") or re.search(r'[\x00-\x1f/\\:*?"<>|]', candidate):
+        raise ValueError("Model did not return a safe filename.")
+    ext = source.suffix.lower()
+    for index in range(100000):
+        suffix = (str(index) if index else "") + ext
+        limit = 255 - len(os.fsencode(suffix))
+        stem = os.fsencode(candidate)[:limit].decode("utf-8", errors="ignore").rstrip(" .")
+        if not stem:
+            raise ValueError("Filename has no usable stem.")
+        dest = source.with_name(stem + suffix)
+        if source == dest:
+            return relative
+        try:
+            move_noreplace(source, dest)
+        except FileExistsError:
+            continue
+        return str(Path(relative).with_name(dest.name))
+    raise ValueError("No unused filename found.")
+
+
+def main():
+    operation, = sys.argv[1:]
+    data = sys.stdin.buffer.read().decode("utf-8")
+    args = data.split("\0") if data else []
+    actions = {
+        "config": lambda *keys: config(keys),
+        "scan": scan, "models": models, "suggest": suggest, "rename": rename,
+    }
+    try:
+        sys.stdout.buffer.write(actions[operation](*args).encode("utf-8"))
+    except (OSError, ValueError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired) as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+if __name__ == "__main__":
+    main()
