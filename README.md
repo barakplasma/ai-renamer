@@ -1,41 +1,43 @@
 # ai-renamer
 
-A native Bend CLI that renames files from their contents using Ollama, LM Studio, or OpenAI. It handles images, video frames, PDFs, and text or source files. It includes the progress bar, ETA, and recursive directory tracking from [PR #27](https://github.com/ozgrozer/ai-renamer/pull/27).
+A native Bend CLI that renames files from their contents using Ollama, LM Studio, or OpenAI. It handles images, videos, PDFs, and text or source files. It includes the progress bar, ETA, and recursive traversal from [upstream PR #27](https://github.com/ozgrozer/ai-renamer/pull/27).
 
-## Build and run
+## Install
 
-Install [Bend 2.0.40](https://bend-lang.com/), Clang, Make, and Python 3.8 or newer. Use Linux or macOS. Video needs FFmpeg and FFprobe. PDFs need Poppler's `pdftotext`.
+Get the Linux or macOS archive for your architecture from [Releases](https://github.com/barakplasma/ai-renamer/releases), or build it with Bend 2.0.40, Go 1.25+, Clang, and Make.
 
 ```sh
 make
-PATH="$PWD/host:$PATH" .build/ai-renamer /path/to/files --model=llava:latest --jobs=32
 make install PREFIX="$HOME/.local"
 ```
 
-To run an installed copy, place `$HOME/.local/bin` on your PATH.
+The output is one `.build/ai-renamer` executable. Bend handles the CLI, filename rules, scheduling, and rollback decisions. A C effect bridge links in the Go host implementation, including HTTP, JSON, filesystem operations, and recovery. Python is only used by the test suite. Video support uses FFmpeg and FFprobe, and PDF support uses Poppler's `pdftotext`.
+
+## Rename and undo
 
 ```sh
-ai-renamer /path --provider=ollama --model=llava:latest
+ai-renamer /path --provider=ollama --model=llava:latest --jobs=32
 ai-renamer /path --provider=lm-studio --base-url=http://127.0.0.1:1234
 ai-renamer /path --provider=openai --api-key="$OPENAI_API_KEY" --model=gpt-4o
-ai-renamer /path --include-subdirectories=true --jobs=32 --case=snakeCase
+ai-renamer /path --include-subdirectories=true --case=snakeCase
+ai-renamer --list-runs
+ai-renamer --rollback RUN_ID
 ```
 
-The existing `~/ai-renamer.json` settings carry over. Passed options are saved there. Use `ai-renamer --help` for option names and defaults. When names collide, the CLI appends a number before the extension. It skips symlinks. `pathCase` uses hyphens to keep names in their existing directory. Concurrent files that get the same suggestion can receive collision suffixes in completion order.
+Existing settings in `~/ai-renamer.json` carry over. The worker pool defaults to 16 concurrent jobs and supports 1–64. Files stay in the same directory. Concurrent files with identical suggestions can get numeric suffixes in completion order.
 
-## Parallel processing
+The CLI prints a run ID before renaming. Before each move, it writes and syncs a journal entry containing both names, the directory and file identity, and a SHA-256 fingerprint. It uses the filesystem's exclusive rename operation so an existing destination cannot be overwritten. If the filesystem cannot perform that operation, the CLI reports an error.
 
-The native build uses a Bend worker pool. Up to 16 workers run by default, with `--jobs` accepting 1–64. Workers independently read files, extract media, ask the model, and apply the names. Each destination is claimed without overwriting an existing file. Completion and ETA are based on the file count from the initial directory scan.
+The journals live at `$XDG_STATE_HOME/ai-renamer` or `~/.local/state/ai-renamer`. Keep them to undo a run, including one interrupted by a crash. Rollback processes the run in reverse order and skips moves it already reversed. It reports conflicts when an original name is occupied or when the renamed file was moved, replaced, or edited. Journals restore names for files that still exist at their recorded locations. They contain no file data.
 
-Bend implements the CLI, model selection, naming, and scheduling. The bundled Python standard-library adapter supplies filesystem operations, HTTP and JSON, and media subprocesses. There are no Node.js or npm runtime dependencies.
-
-## Verify
+## Checks and releases
 
 ```sh
 bend PROOF.bend
 make test
+make verdict  # Optional. Requires Lean v4.34.0 or BENDTT.
 ```
 
-The integration suite uses local mock model endpoints and checks recursive progress, collision protection, provider payloads, failure behavior, and overlapping requests.
+GitHub Actions checks the Bend laws and runs native and CLI tests on Linux and macOS, for both amd64 and arm64. Pushing a `v*` tag publishes one executable per platform in its own archive, plus checksums, after those checks pass. The integration suite uses local model endpoints and tests parallel requests, collisions, interrupted runs, and rollback conflicts.
 
 Based on the GPL-3.0 project [ozgrozer/ai-renamer](https://github.com/ozgrozer/ai-renamer) by Ozgur Ozer.

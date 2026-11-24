@@ -2,6 +2,7 @@ import Base
 import ./Core.bend as Core
 import ./Host.bend as Host
 import ./Options.bend as Options
+import ./Rollback.bend as Rollback
 
 type Settings is Data:
   Config{provider: String, base: String, key: String, model: String, frames: Nat, style: String,
@@ -219,12 +220,23 @@ def report_loop(left: Nat, +done: Nat, +total: Nat, +started: Nat, +out: Chan(Re
         render_progress(1n+done, total, started)
         report_loop(rest, 1n+done, total, started, out, failed || report_failed(report))
 
+def announce_journal(result: Host.Reply) -> IO(Unit):
+  match result:
+    case Host.Error{message}:
+      IO.die(Unit, 1, "Cannot start the recovery journal: " ++ message)
+    case Host.Output{+id}:
+      do IO<Unit>:
+        IO.print("Run ID: " ++ id)
+        IO.print("Undo this run: ai-renamer --rollback " ++ id)
+
 def start_scan(scan: Scan, +settings: Settings, jobs: Nat) -> IO(Unit):
   match scan:
     case Scan{+files, dirs, +warnings}:
       +total = List.length(&2, Target, files)
       +workers = Nat.min(total, jobs)
       do IO<Unit>:
+        journal : Host.Reply <- Host.call("begin", [])
+        announce_journal(journal)
         log_all(dirs, "Processing directory: ")
         log_all(warnings, "🟡 Directory error: ")
         +started : Nat <- IO.now()
@@ -303,12 +315,33 @@ def on_config(config: Host.Reply, path: String) -> IO(Unit):
     case Host.Output{raw}:
       with_fields(path, Host.unpack(raw))
 
+def print_host(result: Host.Reply) -> IO(Unit):
+  match result:
+    case Host.Output{text}:
+      IO.print(text)
+    case Host.Error{message}:
+      IO.die(Unit, 1, message)
+
+def run_rollback(id: String) -> IO(Unit):
+  do IO<Unit>:
+    result : Host.Reply <- Host.call("rollback", [id, Rollback.policy()])
+    print_host(result)
+
+def list_runs() -> IO(Unit):
+  do IO<Unit>:
+    result : Host.Reply <- Host.call("runs", [])
+    print_host(result)
+
 def start(args: Options.Parsed) -> IO(Unit):
   match args:
+    case Options.Rollback{id}:
+      run_rollback(id)
+    case Options.Runs{}:
+      list_runs()
     case Options.Help{}:
       IO.print(Options.help())
     case Options.Version{}:
-      IO.print("ai-renamer 2.0.0")
+      IO.print("ai-renamer 2.1.0")
     case Options.Invalid{message}:
       IO.die(Unit, 1, message)
     case Options.Args{path, settings}:

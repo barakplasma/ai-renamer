@@ -1,5 +1,6 @@
 import Base
 import ./Core.bend as Core
+import ./Rollback.bend as Rollback
 
 # The only text sent to a rename operation comes from a size-limited stem.
 law zero_limit_means_no_stem:
@@ -29,3 +30,51 @@ law collision_candidates_have_a_clean_stem:
 
 law progress_reaches_100_percent:
   {Core.progress(3n, 3n, 42n) == "Processing |========================================| 100% || 3/3 Files || ETA: 0s" : String}
+
+law rollback_when_source_name_is_free:
+  {Rollback.decide(Rollback.Missing{}, Rollback.Matching{}) == Rollback.Restore{} : Rollback.Decision}
+
+law rollback_never_overwrites_different_file:
+  for renamed: Rollback.PathState
+  {Rollback.decide(Rollback.Different{}, renamed) == Rollback.Conflict{} : Rollback.Decision}
+
+law rollback_when_original_already_restored:
+  {Rollback.decide(Rollback.Matching{}, Rollback.Missing{}) == Rollback.Skip{} : Rollback.Decision}
+
+law rollback_leaves_reused_destination_alone:
+  {Rollback.decide(Rollback.Matching{}, Rollback.Different{}) == Rollback.Skip{} : Rollback.Decision}
+
+law rollback_detects_duplicate_identity:
+  {Rollback.decide(Rollback.Matching{}, Rollback.Matching{}) == Rollback.Conflict{} : Rollback.Decision}
+
+law rollback_detects_two_missing_paths:
+  {Rollback.decide(Rollback.Missing{}, Rollback.Missing{}) == Rollback.Conflict{} : Rollback.Decision}
+
+law rollback_does_not_move_replacement_file:
+  {Rollback.decide(Rollback.Missing{}, Rollback.Different{}) == Rollback.Conflict{} : Rollback.Decision}
+
+law rollback_policy_matches_host_order:
+  {Rollback.policy() == "crcscsccc" : String}
+
+law slash_cannot_enter_a_word:
+  {Core.word_char('/') == False{} : Bool}
+
+law backslash_cannot_enter_a_word:
+  {Core.word_char(Char.from_u32(92)) == False{} : Bool}
+
+law null_cannot_enter_a_word:
+  {Core.word_char(Char.from_u32(0)) == False{} : Bool}
+
+law dot_only_names_become_empty:
+  for style: String
+  {Core.filename("..", style, 30n) == "" : String}
+
+law blank_model_output_becomes_empty:
+  for style: String
+  {Core.filename(" \n\t ", style, 30n) == "" : String}
+
+law rendered_stem_is_truncated:
+  {Core.filename("Quarterly Report", "snakeCase", 5n) == "quart" : String}
+
+law empty_run_has_no_pending_work:
+  {Core.percent_done(0n, 0n) == 100n : Nat}

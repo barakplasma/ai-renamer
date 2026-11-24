@@ -1,0 +1,92 @@
+name: CI and release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-15-intel
+            target: darwin-amd64
+          - runner: macos-15
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      BEND_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.5'
+          cache: false
+      - name: Install Bend
+        shell: bash
+        run: |
+          export BEND_HOME="$RUNNER_TEMP/bend"
+          sh ci/install-bend.sh "$BEND_HOME"
+          echo "BEND_HOME=$BEND_HOME" >> "$GITHUB_ENV"
+          echo "$BEND_HOME/bin" >> "$GITHUB_PATH"
+      - name: Install media tools
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y clang ffmpeg poppler-utils
+          else
+            brew install ffmpeg poppler
+          fi
+      - name: Check laws, build, and test rollback
+        run: make test
+      - name: Package single executable
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p dist
+          tar -czf "dist/ai-renamer-$TARGET.tar.gz" -C .build ai-renamer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-renamer-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum ai-renamer-*.tar.gz > SHA256SUMS
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" ai-renamer-*.tar.gz SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes ai-renamer-*.tar.gz SHA256SUMS
+          fi

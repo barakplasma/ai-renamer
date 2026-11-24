@@ -6,6 +6,8 @@ type Parsed is Data:
   Invalid{message: String}
   Help{}
   Version{}
+  Rollback{id: String}
+  Runs{}
 
 def pick_key(index: U32) -> String:
   match index:
@@ -141,8 +143,38 @@ def parse_go(args: List<String>, state: ParseState) -> Parsed:
     case Con{raw, tail}:
       parse_go(tail, update(state, raw))
 
+def rollback_only(args: List<String>) -> Parsed:
+  match args:
+    case Con{id, Nil{}}:
+      Rollback{id}
+    case _:
+      Invalid{"Usage: ai-renamer --rollback RUN_ID"}
+
+def is_special(+operation: String) -> U32:
+  (Bool.to_u32(String.eq(operation, "--rollback")) + 2 * Bool.to_u32(String.eq(operation, "--list-runs")) : U32)
+
+def list_only(args: List<String>) -> Parsed:
+  match args:
+    case Nil{}:
+      Runs{}
+    case _:
+      Invalid{"Usage: ai-renamer --list-runs"}
+
+def parse_entry(mode: U32, operation: String, rest: List<String>) -> Parsed:
+  match mode:
+    case 1:
+      rollback_only(rest)
+    case 2:
+      list_only(rest)
+    case _:
+      parse_go(operation <> rest, Parsing{"", "", [], False{}})
+
 def parse(args: List<String>) -> Parsed:
-  parse_go(args, Parsing{"", "", [], False{}})
+  match args:
+    case Nil{}:
+      parse_go([], Parsing{"", "", [], False{}})
+    case Con{+head, tail}:
+      parse_entry(is_special(head), head, tail)
 
 def value_at(found: Bool, value: String, fallback: String) -> String:
   match found:
@@ -159,7 +191,7 @@ def get(options: List<&2, String>, +key: String) -> String:
       ""
 
 def help() -> String:
-  "Usage: ai-renamer PATH [options]\n\n" ++
+  "Usage: ai-renamer PATH [options]\n       ai-renamer --rollback RUN_ID\n       ai-renamer --list-runs\n\n" ++
   "  -p, --provider                ollama, lm-studio, openai (default: ollama)\n" ++
   "  -a, --api-key                 API key for an OpenAI-compatible endpoint\n" ++
   "  -u, --base-url                Provider endpoint\n" ++

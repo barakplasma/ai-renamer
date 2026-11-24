@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -38,7 +39,10 @@ def model(answer="Quarterly Report", delay=0):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps(body).encode())
+            try:
+                self.wfile.write(json.dumps(body).encode())
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def do_GET(self):
             hits[self.path] += 1
@@ -88,7 +92,7 @@ class Renamer(unittest.TestCase):
         self.files = self.root / "files"
         self.files.mkdir()
         self.env = {**os.environ, "HOME": str(self.home),
-                    "PATH": str(ROOT / "host") + os.pathsep + os.environ["PATH"]}
+                    "XDG_STATE_HOME": str(self.root / "state")}
 
     def run_cli(self, *args, ok=True):
         result = subprocess.run([BINARY, *args, "+RTS", "--threads", "2", "-RTS"],
@@ -204,6 +208,71 @@ class Renamer(unittest.TestCase):
         self.assertIn("Model unavailable", output)
         self.assertIn("1/1 Files", output)
         self.assertEqual(original.read_text(), "Keep this")
+
+    def test_rollback_restores_all_original_names_and_is_repeatable(self):
+        expected = {"one.TXT": b"one", "two.txt": b"two"}
+        for filename, text in expected.items():
+            (self.files / filename).write_bytes(text)
+        with model("Same Name") as (url, _, _, _):
+            output = self.run_cli(self.files, "-u", url, "-m", "mock")
+        run = re.search(r"Run ID: (\S+)", output).group(1)
+        self.assertEqual(self.run_cli("--list-runs").strip(), run)
+        self.assertIn("restored 2 file(s)", self.run_cli("--rollback", run))
+        self.assertIn("restored 0 file(s)", self.run_cli("--rollback", run))
+        self.assertEqual({p.name: p.read_bytes() for p in self.files.iterdir()}, expected)
+
+    def test_rollback_conflicts_preserve_both_files(self):
+        original = self.files / "original.txt"
+        original.write_text("original")
+        with model("new name") as (url, _, _, _):
+            output = self.run_cli(original, "-u", url, "-m", "mock")
+        run = re.search(r"Run ID: (\S+)", output).group(1)
+        renamed = self.files / "new-name.txt"
+        original.write_text("unrelated replacement")
+        self.assertIn("occupied", self.run_cli("--rollback", run, ok=False))
+        self.assertEqual(original.read_text(), "unrelated replacement")
+        self.assertEqual(renamed.read_text(), "original")
+        original.unlink()
+        renamed.write_text("edited after rename")
+        self.assertIn("changed", self.run_cli("--rollback", run, ok=False))
+        self.assertEqual(renamed.read_text(), "edited after rename")
+        self.assertFalse(original.exists())
+
+    def test_failed_journal_prevents_renames(self):
+        bad_state = Path(self.env["XDG_STATE_HOME"])
+        bad_state.write_text("this is a file")
+        original = self.files / "original.txt"
+        original.write_text("untouched")
+        with model() as (url, calls, _, _):
+            output = self.run_cli(original, "-u", url, "-m", "mock", ok=False)
+        self.assertIn("Cannot start the recovery journal", output)
+        self.assertEqual(calls, [])
+        self.assertEqual(original.read_text(), "untouched")
+
+    def test_killed_run_is_recoverable_and_active_run_is_locked(self):
+        old = self.files / "first.txt"
+        old.write_text("first")
+        (self.files / "second.txt").write_text("second")
+        moved = self.files / "new-name.txt"
+        with model("new name", delay=1.5) as (url, _, _, _):
+            process = subprocess.Popen(
+                [BINARY, self.files, "-u", url, "-m", "mock", "-j", "1",
+                 "+RTS", "--threads", "2", "-RTS"],
+                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 10
+                while not moved.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.025)
+                self.assertTrue(moved.exists())
+                run = self.run_cli("--list-runs").strip()
+                self.assertIn("still active", self.run_cli("--rollback", run, ok=False))
+            finally:
+                process.kill()
+                process.communicate(timeout=5)
+        self.assertIn("restored 1 file(s)", self.run_cli("--rollback", run))
+        self.assertEqual(old.read_text(), "first")
+        self.assertEqual((self.files / "second.txt").read_text(), "second")
+        self.assertFalse(moved.exists())
 
     def test_without_recursion_only_root_files_are_counted(self):
         sub = self.files / "sub"
