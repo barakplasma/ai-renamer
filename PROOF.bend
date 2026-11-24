@@ -1,6 +1,8 @@
 import Base
 import ./Core.bend as Core
 import ./Rollback.bend as Rollback
+import ./JsonData.bend as JsonData
+import 0x597f8af3f77d8983aacfa076df42d235/main.bend as Json
 import ./LAWS.bend as Laws
 
 def take_zero(s: String) -> {String.take(s, 0n) == "" : String}:
@@ -80,4 +82,13 @@ def Laws.rendered_stem_is_truncated():
   {==}
 
 def Laws.empty_run_has_no_pending_work():
+  {==}
+
+def Laws.null_response_has_no_filename():
+  {==}
+
+def Laws.numeric_response_has_no_filename():
+  {==}
+
+def Laws.filename_response_preserves_escaped_text():
   {==}

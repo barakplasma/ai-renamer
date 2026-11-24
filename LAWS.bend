@@ -1,6 +1,8 @@
 import Base
 import ./Core.bend as Core
 import ./Rollback.bend as Rollback
+import ./JsonData.bend as JsonData
+import 0x597f8af3f77d8983aacfa076df42d235/main.bend as Json
 
 # The only text sent to a rename operation comes from a size-limited stem.
 law zero_limit_means_no_stem:
@@ -78,3 +80,12 @@ law rendered_stem_is_truncated:
 
 law empty_run_has_no_pending_work:
   {Core.percent_done(0n, 0n) == 100n : Nat}
+
+law null_response_has_no_filename:
+  {JsonData.string(Json.null()) == "" : String}
+
+law numeric_response_has_no_filename:
+  {JsonData.string(Json.num("123")) == "" : String}
+
+law filename_response_preserves_escaped_text:
+  {JsonData.parse_string(Json.parse("\"first\\nsecond\"")) == "first\nsecond" : String}

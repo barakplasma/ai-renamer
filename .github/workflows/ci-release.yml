@@ -32,10 +32,6 @@ jobs:
       BEND_NO_TELEMETRY: '1'
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25.5'
-          cache: false
       - name: Install Bend
         shell: bash
         run: |
@@ -48,7 +44,7 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == Linux ]]; then
             sudo apt-get update
-            sudo apt-get install -y clang ffmpeg poppler-utils
+            sudo apt-get install -y clang libcurl4-openssl-dev libssl-dev ffmpeg poppler-utils
           else
             brew install ffmpeg poppler
           fi

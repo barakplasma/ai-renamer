@@ -250,9 +250,9 @@ class Renamer(unittest.TestCase):
         self.assertEqual(original.read_text(), "untouched")
 
     def test_killed_run_is_recoverable_and_active_run_is_locked(self):
-        old = self.files / "first.txt"
-        old.write_text("first")
-        (self.files / "second.txt").write_text("second")
+        expected = {"first.txt": "first", "second.txt": "second"}
+        for filename, content in expected.items():
+            (self.files / filename).write_text(content)
         moved = self.files / "new-name.txt"
         with model("new name", delay=1.5) as (url, _, _, _):
             process = subprocess.Popen(
@@ -270,9 +270,48 @@ class Renamer(unittest.TestCase):
                 process.kill()
                 process.communicate(timeout=5)
         self.assertIn("restored 1 file(s)", self.run_cli("--rollback", run))
-        self.assertEqual(old.read_text(), "first")
-        self.assertEqual((self.files / "second.txt").read_text(), "second")
+        self.assertEqual({p.name: p.read_text() for p in self.files.iterdir()}, expected)
         self.assertFalse(moved.exists())
+
+    def test_rollback_ignores_an_incomplete_journal_tail(self):
+        original = self.files / "original.txt"
+        original.write_text("untouched")
+        with model("new name") as (url, _, _, _):
+            output = self.run_cli(original, "-u", url, "-m", "mock")
+        run = re.search(r"Run ID: (\S+)", output).group(1)
+        # Re-create the disk state between a synced intent and its rename.
+        (self.files / "new-name.txt").rename(original)
+        journal = Path(self.env["XDG_STATE_HOME"]) / "ai-renamer" / (run + ".journal")
+        with journal.open("ab") as stream:
+            stream.write(b"incomplete journal write")
+        self.assertIn("restored 0 file(s)", self.run_cli("--rollback", run))
+        self.assertEqual(original.read_text(), "untouched")
+
+    def test_source_replaced_during_inference_is_left_alone(self):
+        original = self.files / "original.txt"
+        original.write_text("before")
+        with model("New Name", delay=1) as (url, calls, _, _):
+            process = subprocess.Popen(
+                [BINARY, original, "-u", url, "-m", "mock", "+RTS", "--threads", "2", "-RTS"],
+                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not calls and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(calls)
+                old = self.root / "old.txt"
+                original.rename(old)
+                original.write_text("replacement")
+                stdout, stderr = process.communicate(timeout=5)
+                self.assertEqual(process.returncode, 1, stdout + stderr)
+                self.assertIn("source changed", stdout + stderr)
+                self.assertEqual(old.read_text(), "before")
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=5)
+        self.assertEqual(original.read_text(), "replacement")
+        self.assertFalse((self.files / "new-name.txt").exists())
 
     def test_without_recursion_only_root_files_are_counted(self):
         sub = self.files / "sub"

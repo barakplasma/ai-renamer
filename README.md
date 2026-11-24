@@ -4,14 +4,14 @@ A native Bend CLI that renames files from their contents using Ollama, LM Studio
 
 ## Install
 
-Get the Linux or macOS archive for your architecture from [Releases](https://github.com/barakplasma/ai-renamer/releases), or build it with Bend 2.0.40, Go 1.25+, Clang, and Make.
+Get the Linux or macOS archive for your architecture from [Releases](https://github.com/barakplasma/ai-renamer/releases), or build it with Bend 2.0.40, Clang, Make, and the libcurl headers. Linux also uses the OpenSSL development headers.
 
 ```sh
 make
 make install PREFIX="$HOME/.local"
 ```
 
-The output is one `.build/ai-renamer` executable. Bend handles the CLI, filename rules, scheduling, and rollback decisions. A C effect bridge links in the Go host implementation, including HTTP, JSON, filesystem operations, and recovery. Python is only used by the test suite. Video support uses FFmpeg and FFprobe, and PDF support uses Poppler's `pdftotext`.
+The output is one `.build/ai-renamer` executable. Bend handles the CLI, filename rules, scheduling, model payloads, and rollback decisions. Direct C effects use libcurl for HTTP and the OS filesystem APIs for reads, journal writes, and exclusive renames. [ezjson](https://hub.bend-lang.com/0x597f8af3f77d8983aacfa076df42d235) handles model and settings JSON and is pinned by its BendHub content hash. Python is only used by the test suite. Video uses FFmpeg and FFprobe, and PDF uses Poppler's `pdftotext`.
 
 ## Rename and undo
 
@@ -38,6 +38,6 @@ make test
 make verdict  # Optional. Requires Lean v4.34.0 or BENDTT.
 ```
 
-GitHub Actions checks the Bend laws and runs native and CLI tests on Linux and macOS, for both amd64 and arm64. Pushing a `v*` tag publishes one executable per platform in its own archive, plus checksums, after those checks pass. The integration suite uses local model endpoints and tests parallel requests, collisions, interrupted runs, and rollback conflicts.
+GitHub Actions checks the Bend laws and runs CLI tests on Linux and macOS, for both amd64 and arm64. Pushing a `v*` tag publishes one executable per platform in its own archive, plus checksums, after those checks pass. The integration suite uses local model endpoints and tests parallel requests, collisions, interrupted runs, and rollback conflicts.
 
 Based on the GPL-3.0 project [ozgrozer/ai-renamer](https://github.com/ozgrozer/ai-renamer) by Ozgur Ozer.

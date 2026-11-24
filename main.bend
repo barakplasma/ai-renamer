@@ -1,6 +1,8 @@
 import Base
 import ./Core.bend as Core
 import ./Host.bend as Host
+import ./Model.bend as Model
+import ./Prefs.bend as Prefs
 import ./Options.bend as Options
 import ./Rollback.bend as Rollback
 
@@ -9,7 +11,7 @@ type Settings is Data:
     chars: Nat, language: String, recursive: String, custom: String, jobs: Nat}
 
 type Target is Data:
-  Target{path: String, shown: String, ext: String}
+  Target{path: String, shown: String, ext: String, stamp: String}
 
 type Scan is Data:
   Scan{files: List<&2, Target>, directories: List<&2, String>, warnings: List<&2, String>}
@@ -38,16 +40,16 @@ def assemble(+fields: List<&2, String>, +provider: String, model: String) -> Set
     Core.or_default(Options.get(fields, "defaultLanguage"), "English"), Options.get(fields, "defaultIncludeSubdirectories"),
     Options.get(fields, "defaultCustomPrompt"), setting_number(Options.get(fields, "defaultJobs"), 16n, 64n)}
 
-def keep_file(is_file: Bool, path: String, shown: String, ext: String, acc: List<&2, Target>) -> List<&2, Target>:
+def keep_file(is_file: Bool, path: String, shown: String, ext: String, stamp: String, acc: List<&2, Target>) -> List<&2, Target>:
   match is_file:
     case True{}:
-      Target{path, shown, ext} <> acc
+      Target{path, shown, ext, stamp} <> acc
     case False{}:
       acc
 
-def record_file(tag: String, path: String, +shown: String, ext: String, acc: List<&2, Target>) -> List<&2, Target>:
+def record_file(tag: String, path: String, +shown: String, ext: String, stamp: String, acc: List<&2, Target>) -> List<&2, Target>:
   keep_file(String.eq(tag, "file") && Bool.not(String.eq(shown, ".DS_Store") || String.ends_with(shown, "/.DS_Store")),
-    path, shown, ext, acc)
+    path, shown, ext, stamp, acc)
 
 def keep_line(keep: Bool, line: String, acc: List<&2, String>) -> List<&2, String>:
   match keep:
@@ -64,8 +66,8 @@ def record_warn(tag: String, shown: String, acc: List<&2, String>) -> List<&2, S
 
 def read_records(fields: List<&2, String>, files: List<&2, Target>, dirs: List<&2, String>, warnings: List<&2, String>) -> Scan:
   match fields:
-    case Con{+tag, Con{path, Con{+shown, Con{ext, rest}}}}:
-      read_records(rest, record_file(tag, path, shown, ext, files), record_dir(tag, shown, dirs), record_warn(tag, shown, warnings))
+    case Con{+tag, Con{path, Con{+shown, Con{stamp, Con{ext, rest}}}}}:
+      read_records(rest, record_file(tag, path, shown, ext, stamp, files), record_dir(tag, shown, dirs), record_warn(tag, shown, warnings))
     case _:
       Scan{List.reverse(&2, Target, files), List.reverse(&2, String, dirs), List.reverse(&2, String, warnings)}
 
@@ -92,49 +94,49 @@ def renamed(reply: Host.Reply, shown: String) -> Report:
     case Host.Error{message}:
       Report{"🔴 Rename error: " ++ shown ++ ": " ++ message, True{}}
 
-def apply_name(+name: String, path: String, +shown: String, empty: Bool) -> IO(Report):
+def apply_name(+name: String, path: String, +shown: String, stamp: String, empty: Bool) -> IO(Report):
   match empty:
     case True{}:
       IO.pure(Report, Report{"🔴 Model returned no usable filename: " ++ shown, True{}})
     case False{}:
       do IO<Report>:
-        result : Host.Reply <- Host.call("rename", [path, name, shown])
+        result : Host.Reply <- Host.rename_file(path, name, shown, stamp)
         return renamed(result, shown)
 
-def proposed(result: Host.Reply, path: String, shown: String, style: String, chars: Nat) -> IO(Report):
+def proposed(result: Host.Reply, path: String, shown: String, stamp: String, style: String, chars: Nat) -> IO(Report):
   match result:
     case Host.Output{text}:
       +name = Core.filename(text, style, chars)
-      apply_name(name, path, shown, String.is_empty(name))
+      apply_name(name, path, shown, stamp, String.is_empty(name))
     case Host.Error{message}:
       IO.pure(Report, Report{"🔴 Processing error: " ++ shown ++ ": " ++ message, True{}})
 
-def suggest(settings: Settings, +path: String, shown: String, kind: String) -> IO(Report):
+def suggest(settings: Settings, +path: String, shown: String, stamp: String, kind: String) -> IO(Report):
   match settings:
     case Config{provider, base, key, model, frames, +style, +chars, language, _, custom, _}:
       do IO<Report>:
-        result : Host.Reply <- Host.call("suggest", [provider, base, key, model, kind,
-          Nat.show(frames), path, Core.prompt(style, chars, language), custom])
-        report : Report <- proposed(result, path, shown, style, chars)
+        result : Host.Reply <- Model.suggest(provider, base, key, model, kind,
+          Nat.show(frames), path, Core.prompt(style, chars, language), custom)
+        report : Report <- proposed(result, path, shown, stamp, style, chars)
         return report
 
-def process_kind(kind: Core.FileKind, settings: Settings, path: String, shown: String) -> IO(Report):
+def process_kind(kind: Core.FileKind, settings: Settings, path: String, shown: String, stamp: String) -> IO(Report):
   match kind:
     case Core.Image{}:
-      suggest(settings, path, shown, "image")
+      suggest(settings, path, shown, stamp, "image")
     case Core.Video{}:
-      suggest(settings, path, shown, "video")
+      suggest(settings, path, shown, stamp, "video")
     case Core.PDF{}:
-      suggest(settings, path, shown, "pdf")
+      suggest(settings, path, shown, stamp, "pdf")
     case Core.TextFile{}:
-      suggest(settings, path, shown, "text")
+      suggest(settings, path, shown, stamp, "text")
     case Core.Unsupported{}:
       IO.pure(Report, Report{"🟡 Unsupported file: " ++ shown, False{}})
 
 def process_target(target: Target, settings: Settings) -> IO(Report):
   match target:
-    case Target{path, shown, ext}:
-      process_kind(Core.classify(ext), settings, path, shown)
+    case Target{path, shown, ext, stamp}:
+      process_kind(Core.classify(ext), settings, path, shown, stamp)
 
 def send_result(out: Chan(Report), report: Report, next: IO(Unit)) -> IO(Unit):
   do IO<Unit>:
@@ -235,7 +237,7 @@ def start_scan(scan: Scan, +settings: Settings, jobs: Nat) -> IO(Unit):
       +total = List.length(&2, Target, files)
       +workers = Nat.min(total, jobs)
       do IO<Unit>:
-        journal : Host.Reply <- Host.call("begin", [])
+        journal : Host.Reply <- Host.begin_run()
         announce_journal(journal)
         log_all(dirs, "Processing directory: ")
         log_all(warnings, "🟡 Directory error: ")
@@ -259,7 +261,7 @@ def run(path: String, +settings: Settings) -> IO(Unit):
     case Config{+provider, +base, _, +model, _, _, _, _, +recursive, _, +jobs}:
       do IO<Unit>:
         IO.print("Provider: " ++ provider ++ "  Model: " ++ model ++ "  Endpoint: " ++ base ++ "  Jobs: " ++ Nat.show(jobs))
-        scanned : Host.Reply <- Host.call("scan", [path, recursive])
+        scanned : Host.Reply <- Host.scan(path, recursive)
         on_scan(scanned, settings, jobs)
 
 def on_model(model: String, path: String, fields: List<&2, String>, provider: String) -> IO(Unit):
@@ -284,8 +286,8 @@ def discover(is_openai: Bool, path: String, +fields: List<&2, String>, +provider
       on_model("gpt-4o", path, fields, provider)
     case False{}:
       do IO<Unit>:
-        result : Host.Reply <- Host.call("models", [provider,
-          Core.or_default(Options.get(fields, "defaultBaseURL"), default_url(provider)), Options.get(fields, "defaultApiKey")])
+        result : Host.Reply <- Model.models(provider,
+          Core.or_default(Options.get(fields, "defaultBaseURL"), default_url(provider)), Options.get(fields, "defaultApiKey"))
         on_models(result, path, fields, provider)
 
 def resolve(model: String, path: String, fields: List<&2, String>, +provider: String) -> IO(Unit):
@@ -324,12 +326,12 @@ def print_host(result: Host.Reply) -> IO(Unit):
 
 def run_rollback(id: String) -> IO(Unit):
   do IO<Unit>:
-    result : Host.Reply <- Host.call("rollback", [id, Rollback.policy()])
+    result : Host.Reply <- Host.rollback(id, Rollback.policy())
     print_host(result)
 
 def list_runs() -> IO(Unit):
   do IO<Unit>:
-    result : Host.Reply <- Host.call("runs", [])
+    result : Host.Reply <- Host.runs()
     print_host(result)
 
 def start(args: Options.Parsed) -> IO(Unit):
@@ -346,7 +348,7 @@ def start(args: Options.Parsed) -> IO(Unit):
       IO.die(Unit, 1, message)
     case Options.Args{path, settings}:
       do IO<Unit>:
-        config : Host.Reply <- Host.call("config", settings)
+        config : Host.Reply <- Prefs.load(settings)
         on_config(config, path)
 
 def run_cli(args: List<String>) -> IO(Unit):
