@@ -222,3 +222,6 @@ def styled(+style: String, +xs: List<&2, String>) -> String:
 
 def filename(text: String, style: String, limit: Nat) -> String:
   String.take(styled(style, words(String.trim(text), "", [])), limit)
+
+def docling_extension(ext: String) -> Bool:
+  one_of(String.split("pdf doc docx rtf ppt pptx xls xlsx odt ods odp html htm mhtml md markdown csv asciidoc adoc epub eml msg vtt tex", ' '), String.to_lower(ext))

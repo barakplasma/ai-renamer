@@ -83,14 +83,24 @@ def http(url: String, key: String, body: String) -> IO(Reply):
     result : Result<&1, &1, U32 & String, String> <- http_native(url, key, body)
     return decode(result)
 
-def material_native(kind: String, frames: String, path: String) -> IO(Result<&1, &1, U32 & String, String>):
+def material_native(kind: String, frames: String, path: String, duration: String) -> IO(Result<&1, &1, U32 & String, String>):
   import "./effects/native.c"
   import "./effects/unsupported.js"
 
-def material(kind: String, frames: String, path: String) -> IO(Reply):
+def material(kind: String, frames: String, path: String, duration: String) -> IO(Reply):
   do IO<Reply>:
-    result : Result<&1, &1, U32 & String, String> <- material_native(kind, frames, path)
+    result : Result<&1, &1, U32 & String, String> <- material_native(kind, frames, path, duration)
     return decode(result)
 
 def unpack(s: String) -> List<&2, String>:
   String.split(s, '\0')
+
+
+def docling_native(url: String, key: String, path: String) -> IO(Result<&1, &1, U32 & String, String>):
+  import "./effects/native.c"
+  import "./effects/unsupported.js"
+
+def docling(url: String, key: String, path: String) -> IO(Reply):
+  do IO<Reply>:
+    result : Result<&1, &1, U32 & String, String> <- docling_native(url, key, path)
+    return decode(result)

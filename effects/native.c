@@ -197,6 +197,11 @@ static void __attribute__((constructor)) ar_use_http(void) { io_eff(CID(http_nat
 #endif
 
 #ifdef CID(material_native)
-static Term ar_io_material(Env e, Term *f, IoWork *w) { return ar_start(e, f, w, 3, ar_material); }
+static Term ar_io_material(Env e, Term *f, IoWork *w) { return ar_start(e, f, w, 4, ar_material); }
 static void __attribute__((constructor)) ar_use_material(void) { io_eff(CID(material_native), ar_io_material); }
+#endif
+
+#ifdef CID(docling_native)
+static Term ar_io_docling(Env e, Term *f, IoWork *w) { return ar_start(e, f, w, 3, ar_docling); }
+static void __attribute__((constructor)) ar_use_docling(void) { io_eff(CID(docling_native), ar_io_docling); }
 #endif

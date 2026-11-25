@@ -26,6 +26,7 @@ verdict:
 	$(BEND) PROOF.bend --verdict
 
 test: check all
+	$(BEND) tests/FilenameProperties.bend
 	python3 -m unittest discover -s tests -v
 
 install: all

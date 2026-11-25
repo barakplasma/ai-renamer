@@ -82,6 +82,42 @@ def model(answer="Quarterly Report", delay=0):
             server_thread.join()
 
 
+@contextmanager
+def docling(status="success", text="# Quarterly accounts", http_status=200):
+    uploads = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            from email import policy
+            from email.parser import BytesParser
+
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            header = f"Content-Type: {self.headers['Content-Type']}\r\n\r\n".encode()
+            message = BytesParser(policy=policy.default).parsebytes(header + raw)
+            fields = {
+                part.get_param("name", header="content-disposition"):
+                    (part.get_filename(), part.get_payload(decode=True))
+                for part in message.iter_parts()
+            }
+            uploads.append((self.path, self.headers.get("X-Api-Key"), fields))
+            self.send_response(http_status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": status, "document": {"md_content": text}}).encode())
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}", uploads
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+
 class Renamer(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -93,6 +129,9 @@ class Renamer(unittest.TestCase):
         self.files.mkdir()
         self.env = {**os.environ, "HOME": str(self.home),
                     "XDG_STATE_HOME": str(self.root / "state")}
+
+        self.env.pop("DOCLING_SERVE_URL", None)
+        self.env.pop("DOCLING_SERVE_API_KEY", None)
 
     def run_cli(self, *args, ok=True):
         result = subprocess.run([BINARY, *args, "+RTS", "--threads", "2", "-RTS"],
@@ -194,6 +233,38 @@ class Renamer(unittest.TestCase):
             self.run_cli(source, "-u", url, "-m", "mock")
         self.assertIn("Quarterly accounts", calls[0][2]["prompt"])
         self.assertEqual((self.files / "annual-accounts.pdf").read_bytes(), pdf)
+
+    def test_docling_upload_supplies_extracted_text_to_model_and_rollback(self):
+        original = self.files / "2025 accounts.DOCX"
+        original.write_bytes(b"opaque office bytes")
+        with docling() as (docling_url, uploads), model("New Name") as (url, calls, _, _):
+            self.env.update(DOCLING_SERVE_URL=docling_url + "/v1/", DOCLING_SERVE_API_KEY="local-test")
+            output = self.run_cli(original, "-u", url, "-m", "mock")
+        path, key, fields = uploads[0]
+        self.assertEqual((path, key), ("/v1/convert/file", "local-test"))
+        self.assertEqual(fields["files"], ("2025 accounts.DOCX", b"opaque office bytes"))
+        self.assertEqual(fields["to_formats"][1], b"md")
+        self.assertIn("# Quarterly accounts", calls[0][2]["prompt"])
+        self.assertNotIn("opaque office bytes", calls[0][2]["prompt"])
+        self.assertTrue((self.files / "new-name.docx").is_file())
+        run = re.search(r"Run ID: (\S+)", output).group(1)
+        self.assertIn("restored 1 file(s)", self.run_cli("--rollback", run))
+        self.assertEqual(original.read_bytes(), b"opaque office bytes")
+
+    def test_docling_failures_leave_documents_untouched(self):
+        for status, http_status in (("failure", 200), ("failure", 503)):
+            with self.subTest(http_status=http_status):
+                original = self.files / f"incoming-{http_status}.pdf"
+                original.write_bytes(b"PDF fixture")
+                with docling(status, "partial content", http_status) as (docling_url, uploads), \
+                     model() as (url, calls, _, _):
+                    self.env["DOCLING_SERVE_URL"] = docling_url
+                    output = self.run_cli(original, "--base-url=" + url, "-m", "mock", ok=False)
+                self.assertIn("Docling", output)
+                self.assertEqual(len(uploads), 1)
+                self.assertEqual(len(calls), 0)
+                self.assertEqual(original.read_bytes(), b"PDF fixture")
+
 
     def test_empty_directory_reaches_completion(self):
         output = self.run_cli(self.files, "-m", "mock")

@@ -1,4 +1,6 @@
 import Base
+import ./Options.bend as Options
+import 0x64697f57fea19681b5fa4f87014ce63d/main.bend as Shake
 import ./Core.bend as Core
 import ./Rollback.bend as Rollback
 import ./JsonData.bend as JsonData
@@ -89,3 +91,24 @@ law numeric_response_has_no_filename:
 
 law filename_response_preserves_escaped_text:
   {JsonData.parse_string(Json.parse("\"first\\nsecond\"")) == "first\nsecond" : String}
+
+law generated_filename_obeys_the_requested_length:
+  for text: String
+  for style: String
+  for limit: Nat
+  {String.length(Core.filename(text, style, limit)) ==
+    Nat.min(limit, String.length(Core.styled(style, Core.words(String.trim(text), "", [])))) : Nat}
+
+law cli_spec_has_no_conflicting_options:
+  {Shake.check(Options.spec()) == [] : List<&2, Shake.SpecErr>}
+
+law docling_routes_pdf_and_office_formats:
+  {Core.docling_extension("PDF") == True{} : Bool} &
+  {Core.docling_extension("docx") == True{} : Bool} &
+  {Core.docling_extension("xlsx") == True{} : Bool} &
+  {Core.docling_extension("pptx") == True{} : Bool}
+
+law docling_does_not_receive_model_images_or_plain_text:
+  {Core.docling_extension("png") == False{} : Bool} &
+  {Core.docling_extension("mp4") == False{} : Bool} &
+  {Core.docling_extension("txt") == False{} : Bool}

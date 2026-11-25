@@ -1,4 +1,6 @@
 import Base
+import 0x5fea041be86f1677bfed779e7579233f/files.bend as Files
+import 0x0d2a146cd1cbaedf76cc532bcd3594b0/time.bend as Time
 import ./Core.bend as Core
 import ./Host.bend as Host
 import ./Model.bend as Model
@@ -11,7 +13,7 @@ type Settings is Data:
     chars: Nat, language: String, recursive: String, custom: String, jobs: Nat}
 
 type Target is Data:
-  Target{path: String, shown: String, ext: String, stamp: String}
+  Target{path: String, shown: String, stamp: String}
 
 type Scan is Data:
   Scan{files: List<&2, Target>, directories: List<&2, String>, warnings: List<&2, String>}
@@ -40,16 +42,16 @@ def assemble(+fields: List<&2, String>, +provider: String, model: String) -> Set
     Core.or_default(Options.get(fields, "defaultLanguage"), "English"), Options.get(fields, "defaultIncludeSubdirectories"),
     Options.get(fields, "defaultCustomPrompt"), setting_number(Options.get(fields, "defaultJobs"), 16n, 64n)}
 
-def keep_file(is_file: Bool, path: String, shown: String, ext: String, stamp: String, acc: List<&2, Target>) -> List<&2, Target>:
+def keep_file(is_file: Bool, path: String, shown: String, stamp: String, acc: List<&2, Target>) -> List<&2, Target>:
   match is_file:
     case True{}:
-      Target{path, shown, ext, stamp} <> acc
+      Target{path, shown, stamp} <> acc
     case False{}:
       acc
 
-def record_file(tag: String, path: String, +shown: String, ext: String, stamp: String, acc: List<&2, Target>) -> List<&2, Target>:
+def record_file(tag: String, path: String, +shown: String, stamp: String, acc: List<&2, Target>) -> List<&2, Target>:
   keep_file(String.eq(tag, "file") && Bool.not(String.eq(shown, ".DS_Store") || String.ends_with(shown, "/.DS_Store")),
-    path, shown, ext, stamp, acc)
+    path, shown, stamp, acc)
 
 def keep_line(keep: Bool, line: String, acc: List<&2, String>) -> List<&2, String>:
   match keep:
@@ -66,8 +68,8 @@ def record_warn(tag: String, shown: String, acc: List<&2, String>) -> List<&2, S
 
 def read_records(fields: List<&2, String>, files: List<&2, Target>, dirs: List<&2, String>, warnings: List<&2, String>) -> Scan:
   match fields:
-    case Con{+tag, Con{path, Con{+shown, Con{stamp, Con{ext, rest}}}}}:
-      read_records(rest, record_file(tag, path, shown, ext, stamp, files), record_dir(tag, shown, dirs), record_warn(tag, shown, warnings))
+    case Con{+tag, Con{path, Con{+shown, Con{stamp, rest}}}}:
+      read_records(rest, record_file(tag, path, shown, stamp, files), record_dir(tag, shown, dirs), record_warn(tag, shown, warnings))
     case _:
       Scan{List.reverse(&2, Target, files), List.reverse(&2, String, dirs), List.reverse(&2, String, warnings)}
 
@@ -133,10 +135,20 @@ def process_kind(kind: Core.FileKind, settings: Settings, path: String, shown: S
     case Core.Unsupported{}:
       IO.pure(Report, Report{"🟡 Unsupported file: " ++ shown, False{}})
 
+def process_extension(convert: Bool, ext: String, settings: Settings, path: String, shown: String, stamp: String) -> IO(Report):
+  match convert:
+    case True{}:
+      suggest(settings, path, shown, stamp, "docling")
+    case False{}:
+      process_kind(Core.classify(ext), settings, path, shown, stamp)
+
+def process_path(+ext: String, settings: Settings, path: String, shown: String, stamp: String) -> IO(Report):
+  process_extension(Core.docling_extension(ext), ext, settings, path, shown, stamp)
+
 def process_target(target: Target, settings: Settings) -> IO(Report):
   match target:
-    case Target{path, shown, ext, stamp}:
-      process_kind(Core.classify(ext), settings, path, shown, stamp)
+    case Target{+path, shown, stamp}:
+      process_path(Files.path.extension(path), settings, path, shown, stamp)
 
 def send_result(out: Chan(Report), report: Report, next: IO(Unit)) -> IO(Unit):
   do IO<Unit>:
@@ -198,7 +210,7 @@ def ensure_report(item: Maybe<&1, Report>) -> IO(Report):
 
 def render_progress(done: Nat, total: Nat, started: Nat) -> IO(Unit):
   do IO<Unit>:
-    now : Nat <- IO.now()
+    now : Nat <- Time.mono.ms()
     IO.print(Core.progress(done, total, Nat.div(Nat.sub(now, started), 1000n)))
 
 def finish(failed: Bool) -> IO(Unit):
@@ -241,7 +253,7 @@ def start_scan(scan: Scan, +settings: Settings, jobs: Nat) -> IO(Unit):
         announce_journal(journal)
         log_all(dirs, "Processing directory: ")
         log_all(warnings, "🟡 Directory error: ")
-        +started : Nat <- IO.now()
+        +started : Nat <- Time.mono.ms()
         render_progress(0n, total, started)
         +inbox : Chan(Target) <- Chan.new(Target, U32.from_nat(workers))
         +out : Chan(Report) <- Chan.new(Report, U32.from_nat(workers))
@@ -351,14 +363,7 @@ def start(args: Options.Parsed) -> IO(Unit):
         config : Host.Reply <- Prefs.load(settings)
         on_config(config, path)
 
-def run_cli(args: List<String>) -> IO(Unit):
-  match args:
-    case Nil{}:
-      start(Options.parse([]))
-    case Con{_, rest}:
-      start(Options.parse(rest))
-
 def main() -> IO(Unit):
   do IO<Unit>:
-    args : List<String> <- IO.args()
-    run_cli(args)
+    args : List<&2, String> <- Options.argv()
+    start(Options.parse(args))

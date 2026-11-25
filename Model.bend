@@ -1,4 +1,8 @@
 import Base
+import 0x5fea041be86f1677bfed779e7579233f/files.bend as Files
+import 0x92957abd83651a4f5b5d352560a37e03/process.bend as ProcessTools
+import 0xec25e4adfb02e59e4b817801115988ee/bytes.bend as Bytes
+import 0xe0126415561194eca594bb57287bdd1d/encoding.bend as Encoding
 import ./Core.bend as Core
 import ./Host.bend as Host
 import ./JsonData.bend as JsonData
@@ -135,8 +139,117 @@ def use_material(reply: Host.Reply, media: Bool, ollama: Bool, base: String, key
       +clean = String.trim(text)
       with_text(String.is_empty(clean), clean, ollama, base, key, model, prompt, custom)
 
+def probe_output(status: U32, stdout: Bytes.Bytes, stderr: Bytes.Bytes) -> Host.Reply:
+  match status:
+    case 0:
+      Host.Output{String.trim(Encoding.utf8.decode(stdout))}
+    case _:
+      Host.Error{"ffprobe failed: " ++ String.trim(Encoding.utf8.decode(stderr))}
+
+def probe_result(result: Result<&1, &1, U32 & String, U32 & Bytes.Bytes & Bytes.Bytes>) -> Host.Reply:
+  match result:
+    case Fail{(_, message)}:
+      Host.Error{"ffprobe: " ++ message}
+    case Done{(status, (stdout, stderr))}:
+      probe_output(status, stdout, stderr)
+
+def video_material(probe: Host.Reply, frames: String, path: String) -> IO(Host.Reply):
+  match probe:
+    case Host.Output{duration}:
+      Host.material("video", frames, path, duration)
+    case Host.Error{message}:
+      IO.pure(Host.Reply, Host.Error{message})
+
+def material(video: Bool, kind: String, frames: String, +path: String) -> IO(Host.Reply):
+  match video:
+    case False{}:
+      Host.material(kind, frames, path, "")
+    case True{}:
+      do IO<Host.Reply>:
+        result : Result<&1, &1, U32 & String, U32 & Bytes.Bytes & Bytes.Bytes> <- ProcessTools.run.bounded(
+          "ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
+          [], ".", Bytes.new(0), 120000, 4096)
+        video_material(probe_result(result), frames, path)
+
+def docling_text(+markdown: String, +status: String, usable: Bool) -> Host.Reply:
+  match usable:
+    case True{}:
+      Host.Output{String.take(markdown, 65536n)}
+    case False{}:
+      Host.Error{"Docling extraction produced no usable Markdown (status: " ++ status ++ ")."}
+
+def docling_document(+status: String, +text: String) -> Host.Reply:
+  docling_text(text, status, (String.eq(status, "success") || String.eq(status, "partial_success")) &&
+    Bool.not(String.is_empty(String.trim(text))))
+
+def docling_json(parsed: Maybe<&2, Value.Json>) -> Host.Reply:
+  match parsed:
+    case None{}:
+      Host.Error{"Docling returned invalid JSON."}
+    case Some{+body}:
+      docling_document(JsonData.string(Json.get(body, "status")),
+        JsonData.string(Json.get(Json.get(body, "document"), "md_content")))
+
+def docling_status(ok: Bool, code: String, body: String) -> Host.Reply:
+  match ok:
+    case True{}:
+      docling_json(Json.parse(body))
+    case False{}:
+      Host.Error{"Docling returned HTTP " ++ code ++ "."}
+
+def docling_fields(parts: List<&2, String>) -> Host.Reply:
+  match parts:
+    case Con{+status, tail}:
+      docling_status(String.starts_with(status, "2"), status, String.join(tail, "\0"))
+    case _:
+      Host.Error{"Docling returned no HTTP response."}
+
+def docling_response(reply: Host.Reply) -> Host.Reply:
+  match reply:
+    case Host.Output{text}:
+      docling_fields(Host.unpack(text))
+    case Host.Error{message}:
+      Host.Error{"Docling: " ++ message}
+
+def env_value(value: Result<&1, &1, U32 & String, String>) -> String:
+  match value:
+    case Done{text}: text
+    case Fail{_}: ""
+
+def local_document(kind: Core.FileKind, path: String) -> IO(Host.Reply):
+  match kind:
+    case Core.PDF{}:
+      Host.material("pdf", "", path, "")
+    case Core.TextFile{}:
+      Host.material("text", "", path, "")
+    case _:
+      IO.pure(Host.Reply, Host.Error{"Set DOCLING_SERVE_URL to extract this document."})
+
+def document_endpoint(+base: String) -> String:
+  endpoint(base, "/v1/convert/file")
+
+def document_source(no_server: Bool, base: String, +path: String) -> IO(Host.Reply):
+  match no_server:
+    case True{}:
+      local_document(Core.classify(Files.path.extension(path)), path)
+    case False{}:
+      do IO<Host.Reply>:
+        key : Result<&1, &1, U32 & String, String> <- IO.get_env("DOCLING_SERVE_API_KEY")
+        reply : Host.Reply <- Host.docling(document_endpoint(base), env_value(key), path)
+        return docling_response(reply)
+
+def choose_material(docling: Bool, +kind: String, frames: String, path: String) -> IO(Host.Reply):
+  match docling:
+    case False{}:
+      material(String.eq(kind, "video"), kind, frames, path)
+    case True{}:
+      do IO<Host.Reply>:
+        url : Result<&1, &1, U32 & String, String> <- IO.get_env("DOCLING_SERVE_URL")
+        +base : String = String.trim(env_value(url))
+        document_source(String.is_empty(base), base, path)
+
 def suggest(provider: String, base: String, key: String, model: String, +kind: String, frames: String, path: String, prompt: String, +custom: String) -> IO(Host.Reply):
   do IO<Host.Reply>:
-    data : Host.Reply <- Host.material(kind, frames, path)
+    data : Host.Reply <- choose_material(String.eq(kind, "docling"), kind, frames, path)
     use_material(data, String.eq(kind, "video") || String.eq(kind, "image"), String.eq(provider, "ollama"),
       base, key, model, prompt, Core.choose_match(String.is_empty(custom), "", "\n\nCustom instructions:\n" ++ custom))

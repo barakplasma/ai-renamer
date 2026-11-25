@@ -115,8 +115,6 @@ static bool ar_stamp_matches(ARStamp t, const char *expected) {
 static void ar_record(ARWork *w, const char *tag, const char *path,
                       const char *shown, const char *extra) {
   ar_field(&w->out, tag); ar_field(&w->out, path); ar_field(&w->out, shown); ar_field(&w->out, extra);
-  const char *ext = ar_ext(path);
-  ar_field(&w->out, *ext ? ext + 1 : ext);
 }
 typedef struct { uint64_t dev, ino; } ARIdentity;
 typedef struct { ARIdentity *list; size_t len; } ARVisited;

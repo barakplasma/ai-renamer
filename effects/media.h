@@ -7,6 +7,33 @@ static size_t ar_response(char *data, size_t size, size_t n, void *arg) {
   ar_append(out, data, n*size);
   return n*size;
 }
+static void ar_http_setup(CURL *curl, const char *url, struct curl_slist *headers, ARBuffer *response, long timeout) {
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+#if LIBCURL_VERSION_NUM >= 0x075500
+  curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+#else
+  curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ar_response);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+}
+static void ar_http_perform(ARWork *w, CURL *curl, ARBuffer *response) {
+  CURLcode error = curl_easy_perform(curl);
+  long status = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+  if (error) ar_message(w, curl_easy_strerror(error));
+  else {
+    char code[16];
+    snprintf(code, sizeof code, "%ld", status);
+    ar_field(&w->out, code);
+    if (response->len) ar_append(&w->out, response->data, response->len);
+  }
+}
 static void ar_http(void *task) {
   ARWork *w = task;
   const char *url = w->arg[0], *key = w->arg[1], *body = w->arg[2];
@@ -23,32 +50,69 @@ static void ar_http(void *task) {
     if (asprintf(&authorization, "Authorization: Bearer %s", key) < 0) abort();
     headers = curl_slist_append(headers, authorization);
   }
-  curl_easy_setopt(curl, CURLOPT_URL, url);
-#if LIBCURL_VERSION_NUM >= 0x075500
-  curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-#else
-  curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-#endif
-  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
-  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
-  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ar_response);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  ar_http_setup(curl, url, headers, &response, 120L);
   if (*body) curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-  CURLcode error = curl_easy_perform(curl);
-  long status = 0;
-  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-  if (error) ar_message(w, curl_easy_strerror(error));
-  else {
-    char code[16];
-    snprintf(code, sizeof code, "%ld", status);
-    ar_field(&w->out, code);
-    if (response.len) ar_append(&w->out, response.data, response.len);
-  }
+  ar_http_perform(w, curl, &response);
   curl_easy_cleanup(curl);
   curl_slist_free_all(headers);
   free(authorization); free(response.data);
+}
+
+static size_t ar_upload_read(char *data, size_t size, size_t n, void *arg) {
+  int *fd = arg;
+  ssize_t got;
+  do { got = read(*fd, data, size*n); } while (got < 0 && errno == EINTR);
+  return got < 0 ? CURL_READFUNC_ABORT : (size_t)got;
+}
+static int ar_upload_seek(void *arg, curl_off_t offset, int origin) {
+  int *fd = arg;
+  return lseek(*fd, (off_t)offset, origin) < 0 ? CURL_SEEKFUNC_FAIL : CURL_SEEKFUNC_OK;
+}
+static bool ar_mime_field(curl_mime *form, const char *name, const char *value) {
+  curl_mimepart *part = curl_mime_addpart(form);
+  return part && !curl_mime_name(part, name) && !curl_mime_data(part, value, CURL_ZERO_TERMINATED);
+}
+static void ar_docling(void *task) {
+  ARWork *w = task;
+  const char *url = w->arg[0], *key = w->arg[1], *path = w->arg[2];
+  if ((strncmp(url, "http://", 7) && strncmp(url, "https://", 8)) || strpbrk(key, "\r\n")) {
+    ar_message(w, "invalid Docling endpoint or API key"); return;
+  }
+  int fd = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  struct stat st;
+  if (fd < 0) { ar_error(w, "open document", errno); return; }
+  if (fstat(fd, &st) || !S_ISREG(st.st_mode) || !st.st_size || st.st_size > (64 << 20)) {
+    ar_message(w, "Docling requires a non-empty regular file of at most 64 MiB"); close(fd); return;
+  }
+  pthread_once(&ar_curl_once, ar_curl_init);
+  CURL *curl = ar_curl_init_status ? NULL : curl_easy_init();
+  if (!curl) { ar_message(w, "cannot initialize Docling HTTP"); close(fd); return; }
+  curl_mime *form = curl_mime_init(curl);
+  curl_mimepart *part = form ? curl_mime_addpart(form) : NULL;
+  ARBuffer response = {0};
+  struct curl_slist *headers = curl_slist_append(NULL, "Accept: application/json");
+  if (*key) {
+    char *header;
+    if (asprintf(&header, "X-Api-Key: %s", key) < 0) abort();
+    struct curl_slist *next = curl_slist_append(headers, header);
+    free(header);
+    if (!next) { ar_message(w, "cannot prepare Docling API key"); goto done; }
+    headers = next;
+  }
+  if (!headers || !part || curl_mime_name(part, "files") || curl_mime_filename(part, ar_name(path)) ||
+      curl_mime_data_cb(part, st.st_size, ar_upload_read, ar_upload_seek, NULL, &fd) ||
+      !ar_mime_field(form, "to_formats", "md") || !ar_mime_field(form, "image_export_mode", "placeholder")) {
+    ar_message(w, "cannot prepare Docling upload"); goto done;
+  }
+  ar_http_setup(curl, url, headers, &response, 300L);
+  curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+  ar_http_perform(w, curl, &response);
+done:
+  curl_easy_cleanup(curl);
+  curl_mime_free(form);
+  curl_slist_free_all(headers);
+  free(response.data);
+  close(fd);
 }
 static pthread_mutex_t ar_spawn_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool ar_capture(ARWork *w, char *const args[], ARBuffer *out, size_t limit) {
@@ -146,14 +210,8 @@ static bool ar_image(ARWork *w, const char *path) {
   free(image.data);
   return true;
 }
-static void ar_video(ARWork *w, char *path, int frames) {
+static void ar_video(ARWork *w, char *path, int frames, double seconds) {
   ARBuffer out = {0};
-  char *probe[] = {"ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
-    "default=noprint_wrappers=1:nokey=1", path, NULL};
-  bool ok = ar_capture(w, probe, &out, 2048);
-  double seconds = out.len ? strtod(out.data, NULL) : 0;
-  free(out.data); out = (ARBuffer){0};
-  if (!ok) return;
   if (!isfinite(seconds) || seconds <= 0) { ar_message(w, "video has no positive duration"); return; }
   int count = seconds < frames ? (int)seconds : frames;
   if (count < 1) count = 1;
@@ -167,7 +225,7 @@ static void ar_video(ARWork *w, char *path, int frames) {
   snprintf(number, sizeof number, "%d", count);
   char *command[] = {"ffmpeg", "-nostdin", "-v", "error", "-threads", "1", "-filter_threads", "1",
     "-i", path, "-vf", rate, "-frames:v", number, "-q:v", "2", "-threads", "1", pattern, NULL};
-  ok = ar_capture(w, command, &out, 8192);
+  bool ok = ar_capture(w, command, &out, 8192);
   char *paths[64] = {0};
   size_t found = 0;
   for (int i = 1; i <= count; ++i) {
@@ -195,7 +253,7 @@ static void ar_material(void *task) {
   if (!strcmp(kind, "video")) {
     int frames = atoi(w->arg[1]);
     if (frames < 1 || frames > 64) { ar_message(w, "invalid frame count"); return; }
-    ar_video(w, path, frames); return;
+    ar_video(w, path, frames, strtod(w->arg[3], NULL)); return;
   }
   if (!strcmp(kind, "pdf")) {
     char *args[] = {"pdftotext", path, "-", NULL};

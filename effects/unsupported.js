@@ -26,3 +26,6 @@ io_eff(CID(http_native), () => io_fail(38));
 #ifdef CID(material_native)
 io_eff(CID(material_native), () => io_fail(38));
 #endif
+#ifdef CID(docling_native)
+io_eff(CID(docling_native), () => io_fail(38));
+#endif

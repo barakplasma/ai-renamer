@@ -1,4 +1,5 @@
 import Base
+import 0x15432fae482a0916f1cfffa8b5e1a335/string.bend as MathString
 import ./Core.bend as Core
 import ./Rollback.bend as Rollback
 import ./JsonData.bend as JsonData
@@ -92,3 +93,15 @@ def Laws.numeric_response_has_no_filename():
 
 def Laws.filename_response_preserves_escaped_text():
   {==}
+
+def Laws.generated_filename_obeys_the_requested_length(text, style, limit):
+  MathString.length_take(Core.styled(style, Core.words(String.trim(text), "", [])), limit)
+
+def Laws.cli_spec_has_no_conflicting_options():
+  {==}
+
+def Laws.docling_routes_pdf_and_office_formats():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.docling_does_not_receive_model_images_or_plain_text():
+  ({==}, ({==}, {==}))
