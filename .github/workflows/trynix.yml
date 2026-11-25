@@ -15,13 +15,13 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ github.token }}
-      - name: Build the Linux package
+      - name: Build the Linux ARM package
         run: |
           nix build .#
           ./result/bin/ai-renamer --version
@@ -42,7 +42,7 @@ jobs:
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
         uses: fzakaria/trynix@v1
         with:
-          attrs: .#packages.x86_64-linux.default
+          attrs: .#packages.aarch64-linux.default
           cache: https://${{ vars.TRYNIX_CACHE_NAME }}.cachix.org
           publicKey: ${{ vars.TRYNIX_CACHE_PUBLIC_KEY }}
           verify: fail
@@ -52,5 +52,5 @@ jobs:
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.url }}
         run: |
-          printf '[Open ai-renamer in TryNix](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+          printf '[Open ai-renamer in TryNix (ARM / unkernel)](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
           printf 'TryNix preview: %s\n' "$PREVIEW_URL"
