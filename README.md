@@ -6,7 +6,7 @@ A native Bend CLI that renames files from their contents using Ollama, LM Studio
 
 ### Try in your browser
 
-[Open ai-renamer in TryNix](https://trynix.dev/?path=/nix/store/26hp9dyf8pmw5v8i3s1sx51x79hvns7i-ai-renamer-2.1.0&cache=https://barakplasma-ai-renamer.cachix.org+barakplasma-ai-renamer.cachix.org-1:hQGXXGbTUxVMT9Q7JZQXYdjFmzbCxjJ3xriPuo8qK9U%3D), select **Boot**, and run `ai-renamer --help` in the terminal. The link uses the Linux package built from this project's Nix flake.
+[Open ai-renamer in TryNix](https://trynix.dev/?path=%2Fnix%2Fstore%2F5g6vjvqjbwv6j0zdjvjrs77ymbkbbylj-ai-renamer-2.1.0&cache=https%3A%2F%2Fbarakplasma-ai-renamer.cachix.org+barakplasma-ai-renamer.cachix.org-1%3AhQGXXGbTUxVMT9Q7JZQXYdjFmzbCxjJ3xriPuo8qK9U%3D&engine=unkernel), select **Boot**, and run `ai-renamer --help` in the terminal. The link uses the ARM Linux package built from this project's Nix flake and selects the network-enabled unkernel guest.
 
 For an OpenRouter test, create `~/ai-renamer.json` in the TryNix terminal and replace the placeholder with your key:
 
