@@ -1,0 +1,57 @@
+name: TryNix preview
+
+on:
+  pull_request:
+    paths:
+      - 'flake.*'
+      - 'nix/**'
+      - '.github/workflows/trynix.yml'
+  push:
+    branches: [bend-rewrite]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+      - name: Build the Linux ARM package
+        run: |
+          nix build .#
+          ./result/bin/ai-renamer --version
+      - name: Configure the public cache
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
+        uses: cachix/cachix-action@v17
+        with:
+          name: ${{ vars.TRYNIX_CACHE_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+      - name: Publish the build closure
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
+        env:
+          CACHE_NAME: ${{ vars.TRYNIX_CACHE_NAME }}
+        run: cachix push "$CACHE_NAME" ./result
+      - name: Generate a browser preview
+        id: preview
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
+        uses: fzakaria/trynix@v1
+        with:
+          attrs: .#packages.aarch64-linux.default
+          cache: https://${{ vars.TRYNIX_CACHE_NAME }}.cachix.org
+          publicKey: ${{ vars.TRYNIX_CACHE_PUBLIC_KEY }}
+          verify: fail
+          comment: false
+      - name: Write the preview link
+        if: steps.preview.outputs.url != ''
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+        run: |
+          PREVIEW_URL="${PREVIEW_URL}&engine=unkernel"
+          printf '[Open ai-renamer in TryNix (ARM / unkernel)](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+          printf 'TryNix preview: %s\n' "$PREVIEW_URL"

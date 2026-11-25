@@ -1,8 +1,2 @@
-# directories
-node_modules
-
-# files
-.env
-.DS_Store
-*.sublime-*
-*.code-workspace
+.build/
+__pycache__/

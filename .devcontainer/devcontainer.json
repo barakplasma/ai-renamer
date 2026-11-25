@@ -1,0 +1,9 @@
+{
+  "name": "ai-renamer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "bend version"
+}
