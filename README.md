@@ -4,6 +4,27 @@ A native Bend CLI that renames files from their contents using Ollama, LM Studio
 
 ## Getting started
 
+### Try in your browser
+
+[Open ai-renamer in TryNix](https://trynix.dev/?path=/nix/store/26hp9dyf8pmw5v8i3s1sx51x79hvns7i-ai-renamer-2.1.0&cache=https://barakplasma-ai-renamer.cachix.org+barakplasma-ai-renamer.cachix.org-1:hQGXXGbTUxVMT9Q7JZQXYdjFmzbCxjJ3xriPuo8qK9U%3D), select **Boot**, and run `ai-renamer --help` in the terminal. The link uses the Linux package built from this project's Nix flake.
+
+For an OpenRouter test, create `~/ai-renamer.json` in the TryNix terminal and replace the placeholder with your key:
+
+```sh
+umask 077
+cat > "$HOME/ai-renamer.json" <<'EOF'
+{
+  "defaultProvider": "openai",
+  "defaultBaseURL": "https://openrouter.ai/api/v1",
+  "defaultModel": "openrouter/free",
+  "defaultApiKey": "PASTE_YOUR_OPENROUTER_KEY_HERE"
+}
+EOF
+chmod 600 "$HOME/ai-renamer.json"
+```
+
+Then run `ai-renamer /path/to/file.txt` without repeating the settings. The file stores the key in plaintext. A fresh TryNix VM needs its own configuration. The browser guest must be able to reach the model endpoint.
+
 ### 1. Install the binary
 
 Download the archive for your machine from [Releases](https://github.com/barakplasma/ai-renamer/releases). Until a release is published, sign in to GitHub and download the matching artifact from the latest successful [CI run on `bend-rewrite`](https://github.com/barakplasma/ai-renamer/actions/workflows/ci-release.yml?query=branch%3Abend-rewrite). Unzip the GitHub artifact first to get the `.tar.gz`. Use `uname -m` if you need to check your architecture.
