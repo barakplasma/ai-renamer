@@ -52,5 +52,6 @@ jobs:
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.url }}
         run: |
+          PREVIEW_URL="${PREVIEW_URL}&engine=unkernel"
           printf '[Open ai-renamer in TryNix (ARM / unkernel)](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
           printf 'TryNix preview: %s\n' "$PREVIEW_URL"
