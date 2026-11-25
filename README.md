@@ -2,16 +2,43 @@
 
 A native Bend CLI that renames files from their contents using Ollama, LM Studio, or OpenAI. It handles images, videos, documents, and text or source files. It includes the progress bar, ETA, and recursive traversal from [upstream PR #27](https://github.com/ozgrozer/ai-renamer/pull/27).
 
-## Install
+## Getting started
 
-Get the Linux or macOS archive for your architecture from [Releases](https://github.com/barakplasma/ai-renamer/releases), or build it with Bend 2.0.40, Clang, Make, and the libcurl headers. Linux also uses the OpenSSL development headers.
+### 1. Install the binary
+
+Download the archive for your machine from [Releases](https://github.com/barakplasma/ai-renamer/releases). Until a release is published, sign in to GitHub and download the matching artifact from the latest successful [CI run on `bend-rewrite`](https://github.com/barakplasma/ai-renamer/actions/workflows/ci-release.yml?query=branch%3Abend-rewrite). Unzip the GitHub artifact first to get the `.tar.gz`. Use `uname -m` if you need to check your architecture.
+
+| Machine | Archive |
+| --- | --- |
+| macOS, Apple silicon (`arm64`) | `ai-renamer-darwin-arm64.tar.gz` |
+| macOS, Intel (`x86_64`) | `ai-renamer-darwin-amd64.tar.gz` |
+| Linux, Intel or AMD (`x86_64`) | `ai-renamer-linux-amd64.tar.gz` |
+| Linux, ARM (`aarch64`) | `ai-renamer-linux-arm64.tar.gz` |
+
+From the download directory, replace `ARCHIVE.tar.gz` with your archive's filename:
 
 ```sh
-make
-make install PREFIX="$HOME/.local"
+tar -xzf ARCHIVE.tar.gz
+mkdir -p "$HOME/.local/bin"
+install -m 755 ai-renamer "$HOME/.local/bin/ai-renamer"
+export PATH="$HOME/.local/bin:$PATH"
+ai-renamer --version
 ```
 
-The output is one `.build/ai-renamer` executable. Bend handles the CLI, filename rules, scheduling, model payloads, and rollback decisions. Direct C effects use libcurl for HTTP and the OS filesystem APIs for reads, journal writes, and exclusive renames. Python is only used by the test suite. Video uses FFmpeg and FFprobe. PDF can use Docling or Poppler's `pdftotext`.
+The binary needs no Bend compiler. Linux builds target Ubuntu 24.04 and use the system libcurl and OpenSSL libraries. If those are missing on Ubuntu 24.04, install them with `sudo apt install libcurl4t64 libssl3t64`. Video requires FFmpeg and FFprobe. Local PDF extraction requires Poppler's `pdftotext`.
+
+### 2. Try it with local Ollama
+
+Install and start [Ollama](https://ollama.com/download), then download a model and rename a disposable file:
+
+```sh
+ollama pull gemma3:4b
+sample_dir=$(mktemp -d)
+printf '%s\n' 'Quarterly sales report for the home appliances division.' > "$sample_dir/sample.txt"
+ai-renamer "$sample_dir/sample.txt" --provider=ollama --base-url=http://127.0.0.1:11434 --model=gemma3:4b
+```
+
+The command renames the file in place and prints a run ID. Use `ai-renamer --list-runs` to find it and `ai-renamer --rollback RUN_ID` to restore the original name. To build from source or develop in a Dev Container or BoxD VM, see the [contributor guide](CONTRIBUTING.md).
 
 ## Document extraction with Docling
 
