@@ -25,7 +25,7 @@ class ModelServer(ThreadingHTTPServer):
 
 
 @contextmanager
-def model(answer="Quarterly Report", delay=0):
+def model(answer="Quarterly Report", delay=0, *, model_id="lm-vision"):
     requests = []
     hits = Counter()
     active = peak = 0
@@ -49,7 +49,7 @@ def model(answer="Quarterly Report", delay=0):
             if self.path == "/api/tags":
                 self.send({"models": [{"name": "mistral"}, {"name": "llava:latest"}]})
             elif self.path == "/v1/models":
-                self.send({"data": [{"id": "lm-vision"}]})
+                self.send({"data": [{"id": model_id}]})
             else:
                 self.send({}, 404)
 
@@ -192,6 +192,35 @@ class Renamer(unittest.TestCase):
             self.run_cli(self.files / "simple-image.png", "-p", "lm-studio")
             self.assertEqual(hits["/v1/models"], 1)
             self.assertEqual(calls[-1][2]["model"], "lm-vision")
+
+    def test_local_provider_discovers_model_and_keeps_settings_separate(self):
+        first = self.files / "first.txt"
+        first.write_text("Quarterly spreadsheet plan")
+        saved = self.home / "ai-renamer.json"
+        saved.write_text(json.dumps({
+            "defaultProvider": "openai",
+            "defaultModel": "cloud-model",
+            "defaultBaseURL": "https://api.openai.com",
+            "defaultApiKey": "cloud-test-key",
+        }))
+        with model("first renamed<|eot_id|>", model_id="system") as (url, requests, hits, _):
+            self.run_cli(first, "--provider=local", "--base-url=" + url + "/v1/")
+            self.assertEqual(hits["/v1/models"], 1)
+            path, auth, body = requests[0]
+            self.assertEqual((path, auth, body["model"]), ("/v1/chat/completions", None, "system"))
+            self.assertIn("Quarterly spreadsheet plan", body["messages"][0]["content"])
+            self.assertIsInstance(body["messages"][0]["content"], str)
+            first = self.files / "first-renamed.txt"
+            self.run_cli(first, "--model=custom-local", "--api-key=local-test-key")
+            self.assertEqual(requests[1][1], "Bearer local-test-key")
+            self.assertEqual(requests[1][2]["model"], "custom-local")
+        with model("new endpoint", model_id="llama-file") as (url, requests, hits, _):
+            self.run_cli(first, "--base-url=" + url)
+            self.assertEqual(hits["/v1/models"], 1)
+            self.assertEqual(requests[0][2]["model"], "llama-file")
+            self.assertIsNone(requests[0][1])
+        self.assertEqual(json.loads(saved.read_text())["defaultApiKey"], "cloud-test-key")
+
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg is unavailable")
     def test_short_video_sends_frames_and_cleans_up(self):

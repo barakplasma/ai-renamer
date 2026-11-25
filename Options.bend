@@ -13,7 +13,7 @@ type Option is Data:
   Option{key: String, short: String, long: String, description: String}
 
 def options() -> List<&2, Option>:
-  [Option{"defaultProvider", "p", "provider", "Model provider (default: ollama)"},
+  [Option{"defaultProvider", "p", "provider", "Model provider: ollama, lm-studio, openai, local (default: ollama)"},
    Option{"defaultApiKey", "a", "api-key", "API key for an OpenAI-compatible endpoint"},
    Option{"defaultBaseURL", "u", "base-url", "Provider endpoint"},
    Option{"defaultModel", "m", "model", "Model name (default: automatic selection)"},

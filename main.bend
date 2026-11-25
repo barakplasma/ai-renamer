@@ -23,7 +23,8 @@ type Report is Data:
 
 def default_url(+provider: String) -> String:
   Core.choose_match(String.eq(provider, "ollama"), "http://127.0.0.1:11434",
-    Core.choose_match(String.eq(provider, "lm-studio"), "http://127.0.0.1:1234", "https://api.openai.com"))
+    Core.choose_match(String.eq(provider, "lm-studio"), "http://127.0.0.1:1234",
+      Core.choose_match(String.eq(provider, "local"), "http://127.0.0.1:8080", "https://api.openai.com")))
 
 def bounded(number: Maybe<&2, Nat>, fallback: Nat, max: Nat) -> Nat:
   match number:
@@ -35,9 +36,12 @@ def bounded(number: Maybe<&2, Nat>, fallback: Nat, max: Nat) -> Nat:
 def setting_number(raw: String, fallback: Nat, max: Nat) -> Nat:
   bounded(Nat.read(raw), fallback, max)
 
+def provider_setting(provider: String, fields: List<&2, String>, +key: String) -> String:
+  Options.get(fields, Core.choose_match(String.eq(provider, "local"), Prefs.local_key(key), key))
+
 def assemble(+fields: List<&2, String>, +provider: String, model: String) -> Settings:
-  Config{provider, Core.or_default(Options.get(fields, "defaultBaseURL"), default_url(provider)),
-    Options.get(fields, "defaultApiKey"), model, setting_number(Options.get(fields, "defaultFrames"), 3n, 64n),
+  Config{provider, Core.or_default(provider_setting(provider, fields, "defaultBaseURL"), default_url(provider)),
+    provider_setting(provider, fields, "defaultApiKey"), model, setting_number(Options.get(fields, "defaultFrames"), 3n, 64n),
     Core.or_default(Options.get(fields, "defaultCase"), "kebabCase"), setting_number(Options.get(fields, "defaultChars"), 20n, 255n),
     Core.or_default(Options.get(fields, "defaultLanguage"), "English"), Options.get(fields, "defaultIncludeSubdirectories"),
     Options.get(fields, "defaultCustomPrompt"), setting_number(Options.get(fields, "defaultJobs"), 16n, 64n)}
@@ -108,7 +112,7 @@ def apply_name(+name: String, path: String, +shown: String, stamp: String, empty
 def proposed(result: Host.Reply, path: String, shown: String, stamp: String, style: String, chars: Nat) -> IO(Report):
   match result:
     case Host.Output{text}:
-      +name = Core.filename(text, style, chars)
+      +name = Core.filename(Core.clean_model_text(text), style, chars)
       apply_name(name, path, shown, stamp, String.is_empty(name))
     case Host.Error{message}:
       IO.pure(Report, Report{"🔴 Processing error: " ++ shown ++ ": " ++ message, True{}})
@@ -299,7 +303,7 @@ def discover(is_openai: Bool, path: String, +fields: List<&2, String>, +provider
     case False{}:
       do IO<Unit>:
         result : Host.Reply <- Model.models(provider,
-          Core.or_default(Options.get(fields, "defaultBaseURL"), default_url(provider)), Options.get(fields, "defaultApiKey"))
+          Core.or_default(provider_setting(provider, fields, "defaultBaseURL"), default_url(provider)), provider_setting(provider, fields, "defaultApiKey"))
         on_models(result, path, fields, provider)
 
 def resolve(model: String, path: String, fields: List<&2, String>, +provider: String) -> IO(Unit):
@@ -309,15 +313,15 @@ def resolve(model: String, path: String, fields: List<&2, String>, +provider: St
     case SCon{head, tail}:
       on_model(SCon{head, tail}, path, fields, provider)
 
-def validate(allowed: Bool, path: String, +fields: List<&2, String>, provider: String) -> IO(Unit):
+def validate(allowed: Bool, path: String, +fields: List<&2, String>, +provider: String) -> IO(Unit):
   match allowed:
     case True{}:
-      resolve(Options.get(fields, "defaultModel"), path, fields, provider)
+      resolve(provider_setting(provider, fields, "defaultModel"), path, fields, provider)
     case False{}:
-      IO.die(Unit, 1, "Supported providers are ollama, lm-studio, and openai.")
+      IO.die(Unit, 1, "Supported providers are ollama, lm-studio, openai, and local.")
 
 def select_provider(path: String, fields: List<&2, String>, +provider: String) -> IO(Unit):
-  validate(Core.one_of(["ollama", "lm-studio", "openai"], provider), path, fields, provider)
+  validate(Core.one_of(["ollama", "lm-studio", "openai", "local"], provider), path, fields, provider)
 
 def with_fields(path: String, +fields: List<&2, String>) -> IO(Unit):
   select_provider(path, fields, Core.or_default(Options.get(fields, "defaultProvider"), "ollama"))

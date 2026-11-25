@@ -6,7 +6,8 @@ import 0x597f8af3f77d8983aacfa076df42d235/src/value.bend as Value
 
 def keys() -> List<&2, String>:
   ["defaultProvider", "defaultApiKey", "defaultBaseURL", "defaultModel", "defaultFrames",
-   "defaultCase", "defaultChars", "defaultLanguage", "defaultIncludeSubdirectories", "defaultCustomPrompt", "defaultJobs"]
+   "defaultCase", "defaultChars", "defaultLanguage", "defaultIncludeSubdirectories", "defaultCustomPrompt", "defaultJobs",
+   "localBaseURL", "localApiKey", "localModel"]
 
 def fallback_json(parsed: Maybe<&2, Value.Json>) -> Value.Json:
   match parsed:
@@ -41,6 +42,36 @@ def fields(names: List<&2, String>, +json: Value.Json, +overrides: List<&2, Stri
     case Con{+key, rest}:
       key <> lookup(overrides, key, value_string(Json.get(json, key))) <> fields(rest, json, overrides)
 
+def local_key(+key: String) -> String:
+  Core.choose_match(String.eq(key, "defaultBaseURL"), "localBaseURL",
+    Core.choose_match(String.eq(key, "defaultApiKey"), "localApiKey",
+      Core.choose_match(String.eq(key, "defaultModel"), "localModel", key)))
+
+def local_overrides(overrides: List<&2, String>, rest: List<&2, String>) -> List<&2, String>:
+  match overrides:
+    case Con{key, Con{value, tail}}:
+      local_key(key) <> value <> local_overrides(tail, rest)
+    case _:
+      rest
+
+def reset_endpoint(changed: Bool) -> List<&2, String>:
+  match changed:
+    case True{}: ["localModel", "", "localApiKey", ""]
+    case False{}: []
+
+def provider_overrides(is_local: Bool, +json: Value.Json, +overrides: List<&2, String>) -> List<&2, String>:
+  match is_local:
+    case False{}:
+      overrides
+    case True{}:
+      +previous = value_string(Json.get(json, "localBaseURL"))
+      local_overrides(overrides,
+        reset_endpoint(Bool.not(String.eq(previous, lookup(overrides, "defaultBaseURL", previous)))))
+
+def merged(+json: Value.Json, +overrides: List<&2, String>) -> List<&2, String>:
+  provider = lookup(overrides, "defaultProvider", value_string(Json.get(json, "defaultProvider")))
+  fields(keys(), json, provider_overrides(String.eq(provider, "local"), json, overrides))
+
 def entries(values: List<&2, String>) -> List<&1, String & Value.Json>:
   match values:
     case Con{key, Con{value, rest}}:
@@ -66,7 +97,7 @@ def with_loaded(answer: Host.Reply, +overrides: List<&2, String>) -> IO(Host.Rep
   match answer:
     case Host.Error{message}: IO.pure(Host.Reply, Host.Error{message})
     case Host.Output{text}:
-      save_if_needed(List.is_empty(&2, String, overrides), fields(keys(), fallback_json(Json.parse(text)), overrides))
+      save_if_needed(List.is_empty(&2, String, overrides), merged(fallback_json(Json.parse(text)), overrides))
 
 def load(+overrides: List<&2, String>) -> IO(Host.Reply):
   do IO<Host.Reply>:

@@ -105,3 +105,6 @@ def Laws.docling_routes_pdf_and_office_formats():
 
 def Laws.docling_does_not_receive_model_images_or_plain_text():
   ({==}, ({==}, {==}))
+
+def Laws.chat_end_marker_does_not_enter_filename():
+  {==}

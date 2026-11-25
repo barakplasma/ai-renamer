@@ -225,3 +225,15 @@ def filename(text: String, style: String, limit: Nat) -> String:
 
 def docling_extension(ext: String) -> Bool:
   one_of(String.split("pdf doc docx rtf ppt pptx xls xlsx odt ods odp html htm mhtml md markdown csv asciidoc adoc epub eml msg vtt tex", ' '), String.to_lower(ext))
+
+def remove_end_marker(found: Bool, +text: String, +marker: String) -> String:
+  match found:
+    case True{}:
+      String.take(text, Nat.sub(String.length(text), String.length(marker)))
+    case False{}:
+      text
+
+def clean_model_text(+text: String) -> String:
+  +trimmed = String.trim(text)
+  +marker = {"<|eot_id|>" : String}
+  remove_end_marker(String.ends_with(trimmed, marker), trimmed, marker)

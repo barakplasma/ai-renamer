@@ -99,13 +99,20 @@ def ollama_fields(+model: String, +prompt: String, images: List<&2, Value.Json>)
       [("model", Json.str(model)), ("stream", Json.bool(False{})), ("prompt", Json.str(prompt)),
         ("images", Json.arr(head <> tail))]
 
+def message_content(prompt: String, images: List<&2, Value.Json>) -> Value.Json:
+  match images:
+    case Nil{}:
+      Json.str(prompt)
+    case Con{first, rest}:
+      text = Json.obj([("type", Json.str("text")), ("text", Json.str(prompt))])
+      Json.arr(text <> first <> rest)
+
 def payload(ollama: Bool, model: String, prompt: String, images: List<&2, Value.Json>) -> Value.Json:
   match ollama:
     case True{}:
       Json.obj(ollama_fields(model, prompt, images))
     case False{}:
-      text = Json.obj([("type", Json.str("text")), ("text", Json.str(prompt))])
-      message = Json.obj([("role", Json.str("user")), ("content", Json.arr(text <> images))])
+      message = Json.obj([("role", Json.str("user")), ("content", message_content(prompt, images))])
       Json.obj([("model", Json.str(model)), ("stream", Json.bool(False{})), ("messages", Json.arr([message]))])
 
 def submit(+ollama: Bool, base: String, key: String, model: String, prompt: String, frames: List<&2, String>) -> IO(Host.Reply):

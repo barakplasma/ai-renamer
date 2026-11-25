@@ -47,3 +47,18 @@ Read [LAWS.bend](LAWS.bend) when changing behavior that has a stated guarantee. 
 Use a disposable copy for a manual rename. A service bound to your laptop's `127.0.0.1` is reachable only from that laptop. When running inside a Dev Container or BoxD VM, pass a model endpoint reachable from that environment with `--base-url`. For optional Docling testing, set `DOCLING_SERVE_URL` to a reachable service there too.
 
 For installation and first use on your own machine, see [Getting started](README.md#getting-started).
+
+## Build with Nix on Linux
+
+The flake supports Linux x86-64 and ARM64:
+
+```sh
+nix develop
+make test
+nix build
+nix run . -- --version
+```
+
+The package build fetches Bend and its BendHub dependencies with fixed hashes. If you change a BendHub import, also update [the dependency manifest](nix/bend-deps.json) so the package can build in a Nix sandbox.
+
+For a browser preview, run **TryNix preview** in GitHub Actions once the workflow is on the default branch and a public Cachix cache is configured. Set repository variables `TRYNIX_CACHE_NAME` and `TRYNIX_CACHE_PUBLIC_KEY` and the `CACHIX_AUTH_TOKEN` secret. The workflow publishes the x86-64 build closure and prints the browser URL in the workflow summary. TryNix fetches the package from the cache, so the flake URL alone cannot boot the package. The browser guest needs a model endpoint it can reach to rename files. See the [TryNix preview action](https://github.com/fzakaria/trynix/tree/main/action).

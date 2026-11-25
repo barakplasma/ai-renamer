@@ -112,3 +112,6 @@ law docling_does_not_receive_model_images_or_plain_text:
   {Core.docling_extension("png") == False{} : Bool} &
   {Core.docling_extension("mp4") == False{} : Bool} &
   {Core.docling_extension("txt") == False{} : Bool}
+
+law chat_end_marker_does_not_enter_filename:
+  {Core.filename(Core.clean_model_text("qtr_sales_report<|eot_id|>"), "kebabCase", 20n) == "qtr-sales-report" : String}
