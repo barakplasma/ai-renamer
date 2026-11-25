@@ -6,6 +6,8 @@ on:
       - 'flake.*'
       - 'nix/**'
       - '.github/workflows/trynix.yml'
+  push:
+    branches: [bend-rewrite]
   workflow_dispatch:
 
 permissions:
@@ -24,20 +26,20 @@ jobs:
           nix build .#
           ./result/bin/ai-renamer --version
       - name: Configure the public cache
-        if: github.event_name == 'workflow_dispatch' && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
         uses: cachix/cachix-action@v17
         with:
           name: ${{ vars.TRYNIX_CACHE_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           skipPush: true
       - name: Publish the build closure
-        if: github.event_name == 'workflow_dispatch' && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
         env:
           CACHE_NAME: ${{ vars.TRYNIX_CACHE_NAME }}
         run: cachix push "$CACHE_NAME" ./result
       - name: Generate a browser preview
         id: preview
-        if: github.event_name == 'workflow_dispatch' && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
+        if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && vars.TRYNIX_CACHE_NAME != '' && vars.TRYNIX_CACHE_PUBLIC_KEY != ''
         uses: fzakaria/trynix@v1
         with:
           attrs: .#packages.x86_64-linux.default
@@ -49,4 +51,6 @@ jobs:
         if: steps.preview.outputs.url != ''
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.url }}
-        run: printf '[Open ai-renamer in TryNix](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf '[Open ai-renamer in TryNix](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"
+          printf 'TryNix preview: %s\n' "$PREVIEW_URL"
