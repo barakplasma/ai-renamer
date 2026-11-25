@@ -23,7 +23,21 @@ export DOCLING_SERVE_API_KEY=your-key  # Only if the instance requires it
 ai-renamer /path/to/documents --include-subdirectories=true
 ```
 
-Files such as PDFs, Word documents, PowerPoint presentations, Excel workbooks, OpenDocument files, and selected markup formats go to Docling's multipart `/v1/convert/file` endpoint. The model receives the extracted Markdown, up to 65,536 characters. The CLI uploads documents of up to 64 MiB and caps the Docling response at 1 MiB. A failed or empty conversion leaves the original file in place. Without a Docling URL, PDFs use `pdftotext`, text formats already supported by the CLI stay local, and formats that need Docling report a configuration error.
+Files such as PDFs, Word documents, PowerPoint presentations, Excel workbooks, OpenDocument files, and selected markup formats go to Docling's multipart `/v1/convert/file` endpoint. The model receives the extracted Markdown, up to 65,536 characters. The CLI uploads documents of up to 64 MiB and caps the Docling response at 1 MiB. A failed or empty conversion leaves the original file in place.
+
+### Without Docling
+
+Leave `DOCLING_SERVE_URL` unset to use local file extraction. A model endpoint is still required. Ollama or LM Studio can run locally.
+
+| File type | Behavior without Docling |
+| --- | --- |
+| Supported text and source files, including Markdown, HTML, and CSV | Reads the file directly and sends its text to the configured model. |
+| Supported images, including JPEG, PNG, BMP, and TIFF | Sends the image to a vision-capable model. |
+| Supported videos | Requires `ffmpeg` and `ffprobe` to extract frames for a vision-capable model. |
+| PDFs | Requires Poppler's `pdftotext` and a usable text layer. Image-only scans stay untouched unless OCR text is already embedded or Docling is configured. |
+| Word documents, Excel workbooks, PowerPoint presentations, and other Docling-only formats | Leave the files untouched and report that `DOCLING_SERVE_URL` is required. |
+
+Recursive scanning, parallel jobs, collision protection, and rollback work without Docling. File extraction happens locally in this mode. File text, images, or sampled frames still go to the model endpoint you select.
 
 ## BendHub packages
 
