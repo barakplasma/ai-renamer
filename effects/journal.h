@@ -161,6 +161,10 @@ static void ar_rename(void *task) {
     if (!ar_is_same(dir, from, stamp)) { ar_message(w, "source changed while writing journal"); break; }
     if (ar_exclusive(dir, from, candidate) != 0) { ar_error(w, "exclusive rename", errno); break; }
     if (fsync(dir) != 0) { ar_error(w, "rename journaled; directory sync failed", errno); break; }
+    if (!ar_is_same(dir, candidate, stamp)) {
+      ar_message(w, "rename journaled; destination identity or metadata changed");
+      break;
+    }
     const char *last = strrchr(shown, '/');
     if (last) ar_append(&w->out, shown, (size_t)(last-shown+1));
     ar_text(&w->out, candidate);
@@ -211,7 +215,9 @@ static const char *ar_undo(ARMove m, const char *policy, size_t *restored) {
     char decision = policy[3*from+to];
     if (decision == 'r' && from == 0 && to == 1 && ar_is_same(dir, m.to, m.stamp)) {
       if (ar_exclusive(dir, m.to, m.from) != 0) message = "exclusive restore failed";
-      else { ++*restored; if (fsync(dir) != 0) message = "restored; directory sync failed"; }
+      else if (fsync(dir) != 0) message = "restore journaled; directory sync failed";
+      else if (!ar_is_same(dir, m.from, m.stamp)) message = "restore journaled; destination identity or metadata changed";
+      else ++*restored;
     } else if (decision != 's' || from != 1 || to == 1) {
       message = "original name is occupied or renamed file was changed or removed";
     }

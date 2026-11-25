@@ -321,6 +321,29 @@ class Renamer(unittest.TestCase):
         self.assertIn("restored 0 file(s)", self.run_cli("--rollback", run))
         self.assertEqual({p.name: p.read_bytes() for p in self.files.iterdir()}, expected)
 
+    def test_rename_and_rollback_keep_the_same_file_and_bytes(self):
+        original = self.files / "source.txt"
+        content = b"Quarterly sales\n" * 100
+        original.write_bytes(content)
+        before = original.stat()
+
+        with model("Quarterly Report") as (url, _, _, _):
+            output = self.run_cli(original, "-u", url, "-m", "mock")
+        run = re.search(r"Run ID: (\S+)", output).group(1)
+        renamed = self.files / "quarterly-report.txt"
+        self.assertFalse(original.exists())
+        after = renamed.stat()
+        self.assertEqual((after.st_dev, after.st_ino, after.st_size),
+                         (before.st_dev, before.st_ino, before.st_size))
+        self.assertEqual(renamed.read_bytes(), content)
+
+        self.assertIn("restored 1 file(s)", self.run_cli("--rollback", run))
+        self.assertFalse(renamed.exists())
+        restored = original.stat()
+        self.assertEqual((restored.st_dev, restored.st_ino, restored.st_size),
+                         (before.st_dev, before.st_ino, before.st_size))
+        self.assertEqual(original.read_bytes(), content)
+
     def test_rollback_conflicts_preserve_both_files(self):
         original = self.files / "original.txt"
         original.write_text("original")
@@ -333,9 +356,12 @@ class Renamer(unittest.TestCase):
         self.assertEqual(original.read_text(), "unrelated replacement")
         self.assertEqual(renamed.read_text(), "original")
         original.unlink()
-        renamed.write_text("edited after rename")
+        before = renamed.stat()
+        renamed.write_text("modified")
+        os.utime(renamed, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(renamed.stat().st_size, before.st_size)
         self.assertIn("changed", self.run_cli("--rollback", run, ok=False))
-        self.assertEqual(renamed.read_text(), "edited after rename")
+        self.assertEqual(renamed.read_text(), "modified")
         self.assertFalse(original.exists())
 
     def test_failed_journal_prevents_renames(self):

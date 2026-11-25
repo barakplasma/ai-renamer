@@ -169,7 +169,7 @@ ai-renamer --rollback RUN_ID
 
 Existing settings in `~/ai-renamer.json` carry over. The worker pool defaults to 16 concurrent jobs and supports 1–64. Files stay in the same directory. Concurrent files with identical suggestions can get numeric suffixes in completion order.
 
-The CLI prints a run ID before renaming. Before each move, it writes and syncs a journal entry containing both names, the directory and file identity, and a SHA-256 fingerprint. It uses the filesystem's exclusive rename operation so an existing destination cannot be overwritten. If the filesystem cannot perform that operation, the CLI reports an error.
+The CLI prints a run ID before renaming. Before each move, it writes and syncs a journal entry containing both names, the directory and file identity, and a SHA-256 fingerprint. The CLI validates the destination name and uses an atomic rename within the same directory. The operation keeps the existing file and its contents, and refuses to overwrite an occupied destination. The CLI checks the destination's device, inode, size, and modification time before reporting success. If the filesystem cannot perform the exclusive rename, the CLI reports an error. The Bend laws model these rename rules, and the integration tests check file identity and bytes on disk.
 
 The journals live at `$XDG_STATE_HOME/ai-renamer` or `~/.local/state/ai-renamer`. Keep them to undo a run, including one interrupted by a crash. Rollback processes the run in reverse order and skips moves it already reversed. It reports conflicts when an original name is occupied or when the renamed file was moved, replaced, or edited. Journals restore names for files that still exist at their recorded locations. They contain no file data.
 

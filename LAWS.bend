@@ -3,6 +3,7 @@ import ./Options.bend as Options
 import 0x64697f57fea19681b5fa4f87014ce63d/main.bend as Shake
 import ./Core.bend as Core
 import ./Rollback.bend as Rollback
+import ./RenameSafety.bend as RenameSafety
 import ./JsonData.bend as JsonData
 import 0x597f8af3f77d8983aacfa076df42d235/main.bend as Json
 
@@ -115,3 +116,25 @@ law docling_does_not_receive_model_images_or_plain_text:
 
 law chat_end_marker_does_not_enter_filename:
   {Core.filename(Core.clean_model_text("qtr_sales_report<|eot_id|>"), "kebabCase", 20n) == "qtr-sales-report" : String}
+
+# These laws cover the rename model. Native tests check it against the filesystem.
+law rename_preserves_file_identity_and_size:
+  for inode: Nat
+  for size: Nat
+  {RenameSafety.decide(True{}, True{}, True{}, RenameSafety.FileStamp{inode, size}) ==
+    RenameSafety.MoveToDestination{RenameSafety.FileStamp{inode, size}} : RenameSafety.Move}
+
+law invalid_destination_keeps_source:
+  for source: RenameSafety.FileStamp
+  {RenameSafety.decide(False{}, True{}, True{}, source) ==
+    RenameSafety.KeepSource{source} : RenameSafety.Move}
+
+law occupied_destination_keeps_source:
+  for source: RenameSafety.FileStamp
+  {RenameSafety.decide(True{}, False{}, True{}, source) ==
+    RenameSafety.KeepSource{source} : RenameSafety.Move}
+
+law unsynced_journal_keeps_source:
+  for source: RenameSafety.FileStamp
+  {RenameSafety.decide(True{}, True{}, False{}, source) ==
+    RenameSafety.KeepSource{source} : RenameSafety.Move}
