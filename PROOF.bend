@@ -2,6 +2,7 @@ import Base
 import 0x15432fae482a0916f1cfffa8b5e1a335/string.bend as MathString
 import ./Core.bend as Core
 import ./Rollback.bend as Rollback
+import ./RenameSafety.bend as RenameSafety
 import ./JsonData.bend as JsonData
 import 0x597f8af3f77d8983aacfa076df42d235/main.bend as Json
 import ./LAWS.bend as Laws
@@ -107,4 +108,16 @@ def Laws.docling_does_not_receive_model_images_or_plain_text():
   ({==}, ({==}, {==}))
 
 def Laws.chat_end_marker_does_not_enter_filename():
+  {==}
+
+def Laws.rename_preserves_file_identity_and_size(inode, size):
+  {==}
+
+def Laws.invalid_destination_keeps_source(source):
+  {==}
+
+def Laws.occupied_destination_keeps_source(source):
+  {==}
+
+def Laws.unsynced_journal_keeps_source(source):
   {==}
