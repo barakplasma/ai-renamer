@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(github.event_name == 'pull_request' && '["linux-amd64","linux-arm64"]' || '["linux-amd64","linux-arm64","darwin-amd64","darwin-arm64"]') }}
+        target: ${{ fromJSON(startsWith(github.ref, 'refs/tags/v') && '["linux-amd64","linux-arm64","darwin-amd64","darwin-arm64"]' || '["linux-amd64","linux-arm64"]') }}
     runs-on: ${{ fromJSON('{"linux-amd64":"ubuntu-24.04","linux-arm64":"ubuntu-24.04-arm","darwin-amd64":"macos-15-intel","darwin-arm64":"macos-15"}')[matrix.target] }}
     env:
       BEND_NO_TELEMETRY: '1'
